@@ -120,7 +120,7 @@ let sb=null,CFGERR='';
 try{
   if(SUPABASE_URL.startsWith('YOUR_')||SUPABASE_ANON_KEY.startsWith('YOUR_'))throw new Error('Paste your Supabase URL and anon key into the two lines at the top of admin.html (const SUPABASE_URL and const SUPABASE_ANON_KEY), then upload the file again.');
   if(typeof supabase==='undefined')throw new Error('The Supabase library did not load. Check your internet connection or turn off ad-blockers for this page.');
-  sb=supabase.createClient(cleanUrl(SUPABASE_URL),SUPABASE_ANON_KEY.trim());
+  sb=supabase.createClient(cleanUrl(SUPABASE_URL),SUPABASE_ANON_KEY.trim(),{auth:{storageKey:'phantom-admin-auth'}});
 }catch(e){CFGERR=e.message;}
 if(typeof Chart!=='undefined'){Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';}
 function fail(m){app.innerHTML='';const c=el('div','card');c.style.cssText='max-width:560px;margin:10vh auto';c.append(el('h2',0,'Admin cannot start'),el('p',0,m));app.append(c);}
@@ -128,7 +128,7 @@ window.addEventListener('error',e=>{fail('Script error: '+e.message);});
 
 const PAL=['#a855f7','#f5c542','#22d3ee','#f472b6','#34d399','#fb923c','#818cf8','#e9d5ff'];
 let CATS=[],NM={},T={},ov=null,cfg=null,sel=null,unknown=0,charts={},timer=null,tab='overview',filter='';
-const openSet=new Set();
+const openSet=new Set();let VOT=[];
 const sum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
 const toast=m=>{$('status').textContent=m;};
 
@@ -216,6 +216,13 @@ function shell(){
    <div id="editor"></div>
   </section>
 
+  <section class="tab" id="t-voters">
+   <div class="card"><div class="row" style="justify-content:space-between"><h2 id="vh">Voters</h2>
+    <div class="row"><input id="vq" placeholder="Search name or email…"><button id="vrand" class="gold">🎲 Pick random voter</button><button id="vcsv">Download voters CSV</button></div></div>
+    <p id="vpick" class="note"></p>
+    <div class="scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Categories voted</th><th>Last vote</th><th></th></tr></thead><tbody id="vtb"></tbody></table></div></div>
+  </section>
+
   <section class="tab" id="t-mod">
    <div class="card"><h2>Delete votes (spam / testing)</h2>
     <div class="row"><select id="mscope"><option value="all">All votes</option><option value="category">One category</option><option value="nominee">One nominee</option><option value="invalid">Invalid votes only</option></select>
@@ -234,7 +241,7 @@ function shell(){
     <p id="cfgmsg" class="note"></p></div>
   </section>`;
   const tb=$('tabs');
-  [['overview','Overview'],['races','Races & Wins'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
+  [['overview','Overview'],['races','Races & Wins'],['voters','Voters'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
     const b=el('button',k===tab?'on':'',l);b.dataset.k=k;b.onclick=()=>show(k);tb.append(b);});
   show(tab);
   $('rf').onclick=()=>refresh({editor:true});$('csv').onclick=csv;
@@ -243,6 +250,12 @@ function shell(){
   $('thr').oninput=races;
   $('eq').oninput=e=>{const v=e.target.value.toLowerCase();document.querySelectorAll('#editor details').forEach(d=>{d.style.display=d.dataset.name.includes(v)?'':'none';});};
   $('addcat').onclick=addCat;
+  $('vq').oninput=voters;
+  $('vrand').onclick=()=>{const g=VOT.filter(v=>v.email);if(!g.length){$('vpick').textContent='No Google voters yet.';return;}
+    const v=g[Math.floor(Math.random()*g.length)];$('vpick').textContent='🎉 '+(v.name||'')+' — '+v.email;};
+  $('vcsv').onclick=()=>{const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+    const rows=[['name','email','categories_voted','last_vote']].concat(VOT.map(v=>[v.name,v.email,v.votes,v.last_vote]));
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}));a.download='phantom-awards-voters.csv';a.click();};
   $('cat').onchange=e=>{sel=e.target.value;selCharts();overviewTable();};
   $('mscope').onchange=modTargets;$('mdel').onclick=delVotes;
   $('pz').onchange=e=>saveCfg({paused:e.target.checked});
@@ -260,18 +273,18 @@ function show(k){
 // ---------- data ----------
 async function refresh(o){
   o=o||{};toast('Loading…');
-  const [a,b,c,k,n]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle(),
-    sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort')]);
-  const err=a.error||b.error||k.error||n.error;
+  const [a,b,c,k,n,vt]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle(),
+    sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters')]);
+  const err=a.error||b.error||k.error||n.error||vt.error;
   if(err){toast('Error: '+err.message+' (did you run the latest supabase-setup.sql?)');return;}
   CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,sort:m.sort,category_id:m.category_id}))}));
   NM={};CATS.forEach(c=>c.noms.forEach(m=>NM[m.id]=m));
   T={};unknown=0;
   (a.data||[]).forEach(r=>{if(NM[r.choice]&&NM[r.choice].category_id===r.category_id)(T[r.category_id]=T[r.category_id]||{})[r.choice]=r.votes;else unknown+=r.votes;});
-  ov=b.data;cfg=c.data;
+  ov=b.data;cfg=c.data;VOT=vt.data||[];
   if(!sel||!CATS.find(x=>x.id===sel))sel=CATS[0]?CATS[0].id:null;
   toast('Updated '+new Date().toLocaleTimeString());
-  seedBox();kpis();selCharts();timeChart();partChart();overviewTable();races();modTargets();cfgView();
+  seedBox();kpis();selCharts();timeChart();partChart();overviewTable();races();voters();modTargets();cfgView();
   if(o.editor)editor();
 }
 async function db(p,msg){
@@ -424,6 +437,21 @@ function editor(){
     add.append(an,au,ab);body.append(add);
     d.append(body);root.append(d);
   });
+}
+
+// ---------- voters ----------
+function voters(){
+  const q=($('vq').value||'').toLowerCase();
+  $('vh').textContent='Voters ('+VOT.length+')';
+  const tb=$('vtb');tb.innerHTML='';
+  VOT.filter(v=>((v.name||'')+' '+(v.email||'')).toLowerCase().includes(q)).forEach(v=>{
+    const tr=el('tr');
+    [v.name||'—',v.email||(v.is_anonymous?'(anonymous, before Google login)':'—'),v.votes,new Date(v.last_vote).toLocaleString()].forEach(x=>tr.append(el('td',0,String(x))));
+    const td=el('td');const b=el('button','sm red','Delete votes');
+    b.onclick=async()=>{if(!confirm('Delete all votes by '+(v.email||'this voter')+'?'))return;
+      const r=await sb.rpc('admin_delete_votes',{scope:'voter',target:v.voter_id});
+      toast(r.error?r.error.message:'Deleted '+r.data+' votes');refresh({editor:false});};
+    td.append(b);tr.append(td);tb.append(tr);});
 }
 
 // ---------- moderation ----------

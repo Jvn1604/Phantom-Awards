@@ -150,6 +150,7 @@ create policy "insert own votes" on public.votes for insert with check (
   auth.uid() = voter_id
   and now() < (select voting_ends from public.config)
   and not (select paused from public.config)
+  and coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false  -- Google (non-anonymous) accounts only
   and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
   and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
 create policy "update own votes" on public.votes for update
@@ -158,6 +159,7 @@ create policy "update own votes" on public.votes for update
   auth.uid() = voter_id
   and now() < (select voting_ends from public.config)
   and not (select paused from public.config)
+  and coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false  -- Google (non-anonymous) accounts only
   and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
   and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
 
@@ -180,6 +182,7 @@ begin
   if scope = 'all' then delete from public.votes where true;
   elsif scope = 'category' then delete from public.votes where category_id = target;
   elsif scope = 'nominee' then delete from public.votes where choice = target;
+  elsif scope = 'voter' then delete from public.votes where voter_id = target::uuid;
   elsif scope = 'invalid' then
     delete from public.votes v where not exists
       (select 1 from public.nominees x where x.category_id = v.category_id and x.id::text = v.choice);
@@ -200,3 +203,20 @@ create policy "admin manages nominee images" on storage.objects for all to authe
 
 -- IMPORTANT: votes now store the nominee id (not the name). Clear any test votes:
 --   delete from votes;
+
+-- 7) WHO VOTED (Google login): admin-only list of voters
+create or replace function public.admin_voters()
+returns table (voter_id uuid, email text, name text, votes int, last_vote timestamptz, is_anonymous boolean)
+language sql security definer set search_path = public, auth as $$
+  select v.voter_id, u.email::text,
+         coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name')::text,
+         count(*)::int, max(v.updated_at), coalesce(u.is_anonymous, false)
+  from public.votes v join auth.users u on u.id = v.voter_id
+  where public.is_admin()
+  group by v.voter_id, u.id
+$$;
+revoke execute on function public.admin_voters() from public, anon;
+grant execute on function public.admin_voters() to authenticated;
+
+-- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
+notify pgrst, 'reload schema';
