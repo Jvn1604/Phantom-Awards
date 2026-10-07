@@ -91,12 +91,19 @@ const D=[
 ["Best Value for Money","TR-49|Mewgenics|Vampire Crawlers|Valheim"]
 ].map(c=>({id:c[0].toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''),name:c[0],noms:c[1].split("|")}));
 
-const SUPABASE_URL="YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY="sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J";
 
 const app=document.getElementById('app');
-const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
-Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';
+let sb=null,CFGERR='';
+try{
+  if(SUPABASE_URL.startsWith('YOUR_')||SUPABASE_ANON_KEY.startsWith('YOUR_'))throw new Error('Paste your Supabase URL and anon key into the two lines at the top of admin.html (const SUPABASE_URL and const SUPABASE_ANON_KEY), then upload the file again.');
+  if(typeof supabase==='undefined')throw new Error('The Supabase library did not load. Check your internet connection or turn off ad-blockers for this page.');
+  sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+}catch(e){CFGERR=e.message;}
+if(typeof Chart!=='undefined'){Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';}
+function fail(m){app.innerHTML='';const c=el('div','card');c.style.cssText='max-width:560px;margin:10vh auto';c.append(el('h2',0,'Admin cannot start'),el('p',0,m));app.append(c);}
+window.addEventListener('error',e=>{fail('Script error: '+e.message);});
 const PAL=['#a855f7','#f5c542','#22d3ee','#f472b6','#34d399','#fb923c','#818cf8','#e9d5ff'];
 let T={},ov=null,cfg=null,sel=D[0].id,unknown=0,charts={},timer=null,filter='';
 
@@ -105,7 +112,7 @@ const sum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
 function winnerOf(c){let b=null;c.noms.forEach(n=>{const v=(T[c.id]||{})[n]||0;if(!b||v>b.v)b={n,v};});
   const tot=sum(T[c.id]);const second=c.noms.map(n=>(T[c.id]||{})[n]||0).sort((a,b)=>b-a)[1]||0;
   return b&&b.v>0?{name:b.n,v:b.v,pct:Math.round(b.v*100/tot),lead:b.v-second}:null;}
-function mk(id,conf){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),conf);}
+function mk(id,conf){if(typeof Chart==='undefined'){$('status').textContent='Charts library did not load (ad-blocker?). Numbers and tables still work.';return;}if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),conf);}
 
 function loginView(msg){
   app.innerHTML='';const b=el('div','card');b.id='login';
@@ -125,9 +132,11 @@ function loginView(msg){
 }
 
 async function start(){
+  if(!sb)return fail(CFGERR);
   const {data:{session}}=await sb.auth.getSession();
   if(!session||session.user.is_anonymous)return loginView();
-  const {data:ok}=await sb.rpc('is_admin');
+  const {data:ok,error:rpcErr}=await sb.rpc('is_admin');
+  if(rpcErr){await sb.auth.signOut();return loginView('Database not set up yet ('+rpcErr.message+'). Run supabase-setup.sql in the Supabase SQL Editor.');}
   if(!ok){await sb.auth.signOut();return loginView('This account is not an admin.');}
   shell();await refresh();
   clearInterval(timer);timer=setInterval(()=>{if($('auto').checked)refresh();},30000);
