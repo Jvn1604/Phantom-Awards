@@ -91,15 +91,16 @@ const D=[
 ["Best Value for Money","TR-49|Mewgenics|Vampire Crawlers|Valheim"]
 ].map(c=>({id:c[0].toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''),name:c[0],noms:c[1].split("|")}));
 
-const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co";
+const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co/rest/v1/";
 const SUPABASE_ANON_KEY="sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J";
 
 const app=document.getElementById('app');
+function cleanUrl(u){try{return new URL(u.trim()).origin;}catch(e){return u.trim();}} // keeps only https://xxxx.supabase.co
 let sb=null,CFGERR='';
 try{
   if(SUPABASE_URL.startsWith('YOUR_')||SUPABASE_ANON_KEY.startsWith('YOUR_'))throw new Error('Paste your Supabase URL and anon key into the two lines at the top of admin.html (const SUPABASE_URL and const SUPABASE_ANON_KEY), then upload the file again.');
   if(typeof supabase==='undefined')throw new Error('The Supabase library did not load. Check your internet connection or turn off ad-blockers for this page.');
-  sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  sb=supabase.createClient(cleanUrl(SUPABASE_URL),SUPABASE_ANON_KEY.trim());
 }catch(e){CFGERR=e.message;}
 if(typeof Chart!=='undefined'){Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';}
 function fail(m){app.innerHTML='';const c=el('div','card');c.style.cssText='max-width:560px;margin:10vh auto';c.append(el('h2',0,'Admin cannot start'),el('p',0,m));app.append(c);}

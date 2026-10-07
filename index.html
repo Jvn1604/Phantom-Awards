@@ -64,7 +64,7 @@ h1{font-size:clamp(26px,6vw,46px);text-transform:uppercase;letter-spacing:.18em;
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ===== 1) YOUR SETTINGS =====
-const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co";
+const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co/rest/v1/";
 const SUPABASE_ANON_KEY="sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J";
 const CHANNEL_URL="https://www.youtube.com/@ImDePhantom";
 const DISCORD_URL="YOUR_DISCORD_INVITE_URL";
@@ -135,6 +135,7 @@ const t=k=>(TXT[lang]||TXT.en)[k];
 
 const app=document.getElementById('app');
 const DEMO=location.search.includes('demo');
+function cleanUrl(u){try{return new URL(u.trim()).origin;}catch(e){return u.trim();}} // keeps only https://xxxx.supabase.co
 const ready=!SUPABASE_URL.startsWith("YOUR_");
 let voters=null,sb=null,online=false,myChoices={},counts={},pending=null,msgText='',timer=null;
 let cfg={ends:new Date(Date.now()+7*864e5),reveal:new Date(Date.now()+14*864e5)};
@@ -311,7 +312,7 @@ window.addEventListener('hashchange',async()=>{pending=null;msgText='';await loa
   if(DEMO){msgText='DEMO: fake results for previewing the reveal.';route();return;}
   if(!ready){msgText=t('noSave')+' (add your Supabase URL and anon key)';route();return;}
   try{
-    sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+    sb=supabase.createClient(cleanUrl(SUPABASE_URL),SUPABASE_ANON_KEY.trim());
     const {data:{session}}=await sb.auth.getSession();
     if(!session){const r=await sb.auth.signInAnonymously();if(r.error)throw r.error;}
     online=true;await loadData();route();
