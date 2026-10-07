@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Phantom Awards · Admin</title>
+<style>
+:root{--bg:#050507;--card:#120a20;--text:#f5f2ff;--mute:#a79ccc;--acc:#a855f7;--gold:#f5c542;--line:#2a1b45}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 50% -10%,#2a1054,var(--bg) 50%) fixed;color:var(--text);font-family:system-ui,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 16px 60px}
+h1{margin:0;font-size:24px;letter-spacing:.12em;text-transform:uppercase}
+h2{font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin:0 0 12px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--acc);border-radius:8px;padding:14px}
+.kpi b{display:block;font-size:30px;color:var(--gold)}
+.kpi span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.1em}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.two{grid-template-columns:1fr}}
+button,select,input{font:inherit;background:#1a1030;color:var(--text);border:1px solid var(--acc);border-radius:6px;padding:8px 12px}
+button{cursor:pointer;font-weight:700}button:hover{background:var(--acc)}
+button.gold{background:var(--gold);color:#111;border-color:var(--gold)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--mute);font-size:12px;text-transform:uppercase}
+tr.r{cursor:pointer}tr.r:hover,tr.sel{background:#201238}
+.scroll{max-height:460px;overflow:auto}
+.pill{padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;background:#201238}
+#login{max-width:340px;margin:12vh auto;text-align:center}
+#login input{display:block;width:100%;margin:8px 0}
+#status{color:var(--mute);font-size:13px}
+.cv{position:relative}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+// NOMINEES: keep this list identical to the one in index.html
+const D=[
+["Game of the Year","Resident Evil Requiem|Crimson Desert|Mina the Hollower|Forza Horizon 6|Pragmata|007 First Light"],
+["Best Game Direction","Mina the Hollower|Pragmata|007 First Light|Saros"],
+["Best Narrative","007 First Light|Mixtape|Esoteric Ebb|Romeo Is a Dead Man"],
+["Best Art Direction","Mina the Hollower|MOUSE: P.I. For Hire|Mixtape|Romeo Is a Dead Man"],
+["Best Visual Design","Pragmata|Forza Horizon 6|Crimson Desert|Resident Evil Requiem"],
+["Best Score and Music","Mixtape|Vampire Crawlers|Rhythm Heaven Groove|Mina the Hollower"],
+["Best Audio Design","Resident Evil Requiem|Saros|Marathon|Pragmata"],
+["Best Performance","007 First Light|Resident Evil Requiem|Saros|Romeo Is a Dead Man"],
+["Innovation in Accessibility","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Games for Impact","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best Ongoing","Fortnite|Helldivers 2|No Man's Sky|Diablo 4: Lord of Hatred"],
+["Best Community Support","Helldivers 2|No Man's Sky|Fortnite|Valheim"],
+["Best Independent Game","Mina the Hollower|Mewgenics|Cairn|Big Walk"],
+["Best Debut Indie Game","Esoteric Ebb|Wax Heads|Love Eternal|Creature Kitchen"],
+["Best Mobile Game","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best VR / AR","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best Action Game","Pragmata|Saros|Nioh 3|Romeo Is a Dead Man"],
+["Best Action / Adventure","007 First Light|Mina the Hollower|Crimson Desert|Resident Evil Requiem"],
+["Best RPG","Crimson Desert|The Blood of Dawnwalker|Fire Emblem: Fortune's Weave|Trails in the Sky 2nd Chapter"],
+["Best Fighting","Marvel Tokon: Fighting Souls|2XKO|Nominee C|Nominee D"],
+["Best Family","Star Fox|Big Hops|Splatoon Raiders|Rhythm Heaven Groove"],
+["Best Remake / Remaster","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best Sim / Strategy","Mewgenics|Pokémon Pokopia|Creature Kitchen|Fire Emblem: Fortune's Weave"],
+["Best Sports / Racing","Forza Horizon 6|Nominee B|Nominee C|Nominee D"],
+["Best Multiplayer","Marathon|2XKO|Marvel Tokon: Fighting Souls|Big Walk"],
+["Best Adaptation","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Most Anticipated Game","Grand Theft Auto VI|Marvel's Wolverine|The Duskbloods|Lords of the Fallen II"],
+["Content Creator of the Year","Creator A|Creator B|Creator C|Creator D"],
+["Best Esports Game","Counter-Strike 2|League of Legends|Valorant|Dota 2"],
+["Best Esports Athlete","Athlete A|Athlete B|Athlete C|Athlete D"],
+["Best Esports Team","Team A|Team B|Team C|Team D"],
+["Most Disappointing Game","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best Hidden Gem","TR-49|Wax Heads|Esoteric Ebb|Lost and Found Co."],
+["Best Boss Fight","Nioh 3|Mina the Hollower|Saros|Resident Evil Requiem"],
+["Hardest Game","Nioh 3|Beast of Reincarnation|Mortal Shell II|Code Vein II"],
+["Best Co-op Game","Big Walk|Nominee B|Nominee C|Nominee D"],
+["Best Roguelike","Mewgenics|Vampire Crawlers|Nominee C|Nominee D"],
+["Best Soulslike","Nioh 3|Code Vein II|Beast of Reincarnation|Mortal Shell II"],
+["Best Horror","Resident Evil Requiem|Love Eternal|Nominee C|Nominee D"],
+["Best Open World","Crimson Desert|Forza Horizon 6|Nioh 3|The Blood of Dawnwalker"],
+["Best Platformer","Big Hops|Love Eternal|Cairn|Nominee D"],
+["Best Character","Mina (Mina the Hollower)|James Bond (007 First Light)|Leon S. Kennedy (Resident Evil Requiem)|Nominee D"],
+["Best Villain","Villain A|Villain B|Villain C|Villain D"],
+["Best Trailer","Trailer A|Trailer B|Trailer C|Trailer D"],
+["Best PC Port","Nominee A|Nominee B|Nominee C|Nominee D"],
+["Best Value for Money","TR-49|Mewgenics|Vampire Crawlers|Valheim"]
+].map(c=>({id:c[0].toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''),name:c[0],noms:c[1].split("|")}));
+
+const SUPABASE_URL="YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY";
+
+const app=document.getElementById('app');
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';
+const PAL=['#a855f7','#f5c542','#22d3ee','#f472b6','#34d399','#fb923c','#818cf8','#e9d5ff'];
+let T={},ov=null,cfg=null,sel=D[0].id,unknown=0,charts={},timer=null,filter='';
+
+function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;}
+const sum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
+function winnerOf(c){let b=null;c.noms.forEach(n=>{const v=(T[c.id]||{})[n]||0;if(!b||v>b.v)b={n,v};});
+  const tot=sum(T[c.id]);const second=c.noms.map(n=>(T[c.id]||{})[n]||0).sort((a,b)=>b-a)[1]||0;
+  return b&&b.v>0?{name:b.n,v:b.v,pct:Math.round(b.v*100/tot),lead:b.v-second}:null;}
+function mk(id,conf){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),conf);}
+
+function loginView(msg){
+  app.innerHTML='';const b=el('div','card');b.id='login';
+  b.append(el('h1',0,'Admin'));
+  const e=el('input');e.type='email';e.placeholder='Admin email';
+  const p=el('input');p.type='password';p.placeholder='Password';
+  const go=el('button','gold','Sign in');go.style.width='100%';
+  const m=el('p');m.id='status';m.textContent=msg||'';
+  go.onclick=async()=>{
+    go.disabled=true;m.textContent='Signing in…';
+    const {error}=await sb.auth.signInWithPassword({email:e.value.trim(),password:p.value});
+    if(error){m.textContent=error.message;go.disabled=false;return;}
+    start();
+  };
+  p.onkeydown=ev=>{if(ev.key==='Enter')go.click();};
+  b.append(e,p,go,m);app.append(b);
+}
+
+async function start(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session||session.user.is_anonymous)return loginView();
+  const {data:ok}=await sb.rpc('is_admin');
+  if(!ok){await sb.auth.signOut();return loginView('This account is not an admin.');}
+  shell();await refresh();
+  clearInterval(timer);timer=setInterval(()=>{if($('auto').checked)refresh();},30000);
+}
+const $=id=>document.getElementById(id);
+
+function shell(){
+  app.innerHTML=`
+  <div class="bar"><div><h1>Phantom Awards · Admin</h1><div id="status"></div></div>
+   <div class="row"><label class="row"><input type="checkbox" id="auto" checked> auto-refresh 30s</label>
+   <button id="rf">Refresh</button><button id="csv">Download CSV</button><button id="out">Sign out</button></div></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="two">
+   <div class="card"><div class="row" style="justify-content:space-between"><h2>Selected category</h2><select id="cat"></select></div><div class="cv"><canvas id="c1" height="230"></canvas></div></div>
+   <div class="card"><h2>Share of votes</h2><div class="cv"><canvas id="c2" height="230"></canvas></div></div>
+  </div>
+  <div class="two">
+   <div class="card"><h2>Votes over time</h2><div class="cv"><canvas id="c3" height="230"></canvas></div></div>
+   <div class="card"><h2>Event dates</h2>
+    <p id="phase"></p>
+    <div class="row">Voting closes <input type="datetime-local" id="ends"></div><br>
+    <div class="row">Results reveal <input type="datetime-local" id="rev"></div><br>
+    <div class="row"><button id="sv" class="gold">Save dates</button><button id="now">Reveal results now</button><button id="cl">Close voting now</button></div>
+    <p id="cfgmsg"></p></div>
+  </div>
+  <div class="card"><h2>Votes per category</h2><div class="cv" id="c4box"><canvas id="c4"></canvas></div></div>
+  <div class="card"><div class="row" style="justify-content:space-between"><h2>All winners (click a row)</h2><input id="q" placeholder="Search category…"></div>
+   <div class="scroll"><table><thead><tr><th>Category</th><th>Leader</th><th>Votes</th><th>Share</th><th>Lead</th><th>Total votes</th></tr></thead><tbody id="tb"></tbody></table></div></div>`;
+  $('rf').onclick=refresh;$('csv').onclick=csv;
+  $('out').onclick=async()=>{clearInterval(timer);await sb.auth.signOut();loginView();};
+  $('q').oninput=e=>{filter=e.target.value.toLowerCase();table();};
+  const s=$('cat');D.forEach(c=>{const o=el('option',0,c.name);o.value=c.id;s.append(o);});
+  s.onchange=()=>{sel=s.value;catCharts();table();};
+  $('sv').onclick=()=>saveCfg($('ends').value,$('rev').value);
+  $('now').onclick=()=>saveCfg(null,new Date().toISOString());
+  $('cl').onclick=()=>saveCfg(new Date().toISOString(),null);
+}
+
+async function refresh(){
+  $('status').textContent='Loading…';
+  const [a,b,c]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle()]);
+  if(a.error||b.error){$('status').textContent='Error: '+(a.error||b.error).message+' (did you run the SQL and add your email to admins?)';return;}
+  const valid={};D.forEach(c=>valid[c.id]=new Set(c.noms));
+  T={};unknown=0;
+  (a.data||[]).forEach(r=>{if(valid[r.category_id]&&valid[r.category_id].has(r.choice))(T[r.category_id]=T[r.category_id]||{})[r.choice]=r.votes;else unknown+=r.votes;});
+  ov=b.data;cfg=c.data;
+  $('status').textContent='Updated '+new Date().toLocaleTimeString();
+  kpis();catCharts();timeChart();partChart();table();cfgView();
+}
+
+function kpis(){
+  const tot=D.reduce((n,c)=>n+sum(T[c.id]),0);
+  const top=[...D].sort((x,y)=>sum(T[y.id])-sum(T[x.id]))[0];
+  const items=[['Voters',ov.voters],['Total votes',tot],['Avg categories / voter',ov.voters?(tot/ov.voters).toFixed(1):'0'],['Most voted category',top&&sum(T[top.id])?top.name:'-'],['Unrecognised votes',unknown]];
+  const k=$('kpis');k.innerHTML='';
+  items.forEach(([l,v])=>{const d=el('div','kpi');d.append(el('b',0,String(v)),el('span',0,l));k.append(d);});
+  k.children[3].firstChild.style.fontSize='18px';
+}
+
+function catCharts(){
+  $('cat').value=sel;
+  const c=D.find(x=>x.id===sel),vals=c.noms.map(n=>(T[c.id]||{})[n]||0);
+  mk('c1',{type:'bar',data:{labels:c.noms,datasets:[{label:'Votes',data:vals,backgroundColor:c.noms.map((_,i)=>PAL[i%PAL.length])}]},
+    options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+  mk('c2',{type:'doughnut',data:{labels:c.noms,datasets:[{data:vals,backgroundColor:c.noms.map((_,i)=>PAL[i%PAL.length]),borderWidth:0}]},
+    options:{plugins:{legend:{position:'bottom'}}}});
+}
+
+function timeChart(){
+  const d=ov.daily||[];let run=0;
+  mk('c3',{data:{labels:d.map(x=>x.day),datasets:[
+    {type:'bar',label:'Votes that day',data:d.map(x=>x.n),backgroundColor:'#a855f7'},
+    {type:'line',label:'Cumulative',data:d.map(x=>run+=x.n),borderColor:'#f5c542',tension:.3}]},
+    options:{scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+}
+
+function partChart(){
+  const s=[...D].sort((x,y)=>sum(T[y.id])-sum(T[x.id]));
+  $('c4box').style.height=Math.max(260,s.length*20)+'px';
+  mk('c4',{type:'bar',data:{labels:s.map(c=>c.name),datasets:[{label:'Votes',data:s.map(c=>sum(T[c.id])),backgroundColor:'#a855f7'}]},
+    options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},
+      onClick:(e,els)=>{if(els.length){sel=s[els[0].index].id;catCharts();table();window.scrollTo({top:0,behavior:'smooth'});}},
+      scales:{x:{beginAtZero:true,ticks:{precision:0}}}}});
+}
+
+function table(){
+  const tb=$('tb');tb.innerHTML='';
+  D.filter(c=>c.name.toLowerCase().includes(filter)).forEach(c=>{
+    const w=winnerOf(c),tr=el('tr','r'+(c.id===sel?' sel':''));
+    [c.name,w?w.name:'—',w?w.v:0,w?w.pct+'%':'-',w?'+'+w.lead:'-',sum(T[c.id])].forEach(v=>tr.append(el('td',0,String(v))));
+    tr.onclick=()=>{sel=c.id;catCharts();table();};
+    tb.append(tr);
+  });
+}
+
+function csv(){
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const rows=[['category','nominee','votes','share_percent']];
+  D.forEach(c=>{const tot=sum(T[c.id]);c.noms.forEach(n=>{const v=(T[c.id]||{})[n]||0;rows.push([c.name,n,v,tot?(v*100/tot).toFixed(1):'0']);});});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}));
+  a.download='phantom-awards-results.csv';a.click();
+}
+
+const loc=iso=>{const d=new Date(iso);return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);};
+function cfgView(){
+  if(!cfg)return;
+  $('ends').value=loc(cfg.voting_ends);$('rev').value=loc(cfg.reveal_at);
+  const n=Date.now(),p=n<new Date(cfg.voting_ends)?'Voting is OPEN':n<new Date(cfg.reveal_at)?'Voting CLOSED, results hidden':'Results are LIVE';
+  $('phase').textContent='';$('phase').append(el('span','pill',p));
+}
+async function saveCfg(ends,rev){
+  const u={};if(ends)u.voting_ends=new Date(ends).toISOString();if(rev)u.reveal_at=new Date(rev).toISOString();
+  const {error}=await sb.from('config').update(u).eq('id',1);
+  $('cfgmsg').textContent=error?'Error: '+error.message:'Saved.';
+  if(!error)refresh();
+}
+
+start();
+</script>
+</body>
+</html>
