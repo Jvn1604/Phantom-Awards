@@ -108,3 +108,95 @@ create policy "admin updates config" on public.config for update
 revoke execute on function public.admin_totals(), public.admin_overview() from public, anon;
 grant execute on function public.is_admin(), public.public_voter_count() to anon, authenticated;
 grant execute on function public.admin_totals(), public.admin_overview() to authenticated;
+
+-- =====================================================================
+-- 6) EDITABLE CATEGORIES + NOMINEES + PICTURES + PAUSE SWITCH
+-- After running this, open admin.html > Overview and click
+-- "Import default list" once. From then on you edit everything in admin.html.
+-- =====================================================================
+alter table public.config add column if not exists paused boolean not null default false;
+
+create table if not exists public.categories (
+  id     text primary key,
+  name   text not null,
+  sort   int  not null default 0,
+  hidden boolean not null default false,
+  closed boolean not null default false
+);
+create table if not exists public.nominees (
+  id          uuid primary key default gen_random_uuid(),
+  category_id text not null references public.categories(id) on delete cascade,
+  name        text not null,
+  image_url   text,
+  sort        int  not null default 0
+);
+alter table public.categories enable row level security;
+alter table public.nominees   enable row level security;
+
+drop policy if exists "read categories"        on public.categories;
+drop policy if exists "admin writes categories" on public.categories;
+drop policy if exists "read nominees"          on public.nominees;
+drop policy if exists "admin writes nominees"   on public.nominees;
+create policy "read categories" on public.categories for select using (not hidden or public.is_admin());
+create policy "admin writes categories" on public.categories for all using (public.is_admin()) with check (public.is_admin());
+create policy "read nominees" on public.nominees for select using (
+  exists (select 1 from public.categories c where c.id = nominees.category_id and (not c.hidden or public.is_admin())));
+create policy "admin writes nominees" on public.nominees for all using (public.is_admin()) with check (public.is_admin());
+
+-- Votes are now checked: not paused, before deadline, category open, and the choice must be a real nominee
+drop policy if exists "insert own votes" on public.votes;
+drop policy if exists "update own votes" on public.votes;
+create policy "insert own votes" on public.votes for insert with check (
+  auth.uid() = voter_id
+  and now() < (select voting_ends from public.config)
+  and not (select paused from public.config)
+  and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
+create policy "update own votes" on public.votes for update
+  using (auth.uid() = voter_id)
+  with check (
+  auth.uid() = voter_id
+  and now() < (select voting_ends from public.config)
+  and not (select paused from public.config)
+  and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
+
+-- Public totals now skip hidden categories (choice = nominee id)
+create or replace function public.get_totals()
+returns table (category_id text, choice text, votes int)
+language sql security definer set search_path = public as $$
+  select v.category_id, v.choice, count(*)::int
+  from public.votes v join public.categories c on c.id = v.category_id
+  where not c.hidden and now() >= (select reveal_at from public.config)
+  group by v.category_id, v.choice
+$$;
+
+-- Admin: delete spam / test votes
+create or replace function public.admin_delete_votes(scope text, target text default null)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if scope = 'all' then delete from public.votes where true;
+  elsif scope = 'category' then delete from public.votes where category_id = target;
+  elsif scope = 'nominee' then delete from public.votes where choice = target;
+  elsif scope = 'invalid' then
+    delete from public.votes v where not exists
+      (select 1 from public.nominees x where x.category_id = v.category_id and x.id::text = v.choice);
+  else raise exception 'bad scope'; end if;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke execute on function public.admin_delete_votes(text, text) from public, anon;
+grant execute on function public.admin_delete_votes(text, text) to authenticated;
+
+-- Picture storage (public images, only you can upload)
+insert into storage.buckets (id, name, public) values ('nominee-images', 'nominee-images', true)
+on conflict (id) do nothing;
+drop policy if exists "admin manages nominee images" on storage.objects;
+create policy "admin manages nominee images" on storage.objects for all to authenticated
+  using (bucket_id = 'nominee-images' and public.is_admin())
+  with check (bucket_id = 'nominee-images' and public.is_admin());
+
+-- IMPORTANT: votes now store the nominee id (not the name). Clear any test votes:
+--   delete from votes;
