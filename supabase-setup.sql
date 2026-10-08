@@ -218,5 +218,43 @@ $$;
 revoke execute on function public.admin_voters() from public, anon;
 grant execute on function public.admin_voters() to authenticated;
 
+-- =====================================================================
+-- 8) COLLAB CHANNELS, ANNOUNCEMENT BANNER, MORE ADMIN STATS
+-- =====================================================================
+alter table public.config add column if not exists announcement text;
+
+create table if not exists public.collabs (
+  id       uuid primary key default gen_random_uuid(),
+  name     text not null,
+  url      text not null,
+  icon_url text,
+  sort     int  not null default 0
+);
+alter table public.collabs enable row level security;
+drop policy if exists "read collabs"         on public.collabs;
+drop policy if exists "admin writes collabs" on public.collabs;
+create policy "read collabs" on public.collabs for select using (true);
+create policy "admin writes collabs" on public.collabs for all using (public.is_admin()) with check (public.is_admin());
+
+-- Admin overview now also returns votes per hour (48h) and how many categories each voter finished
+create or replace function public.admin_overview() returns json
+language sql security definer set search_path = public as $$
+  select case when public.is_admin() then json_build_object(
+    'voters', (select count(distinct voter_id) from public.votes),
+    'votes',  (select count(*) from public.votes),
+    'daily',  (select coalesce(json_agg(json_build_object('day', d, 'n', n) order by d), '[]'::json)
+               from (select updated_at::date d, count(*) n from public.votes group by 1) x),
+    'hourly', (select coalesce(json_agg(json_build_object('h', h, 'n', n) order by h), '[]'::json)
+               from (select date_trunc('hour', updated_at) h, count(*) n from public.votes
+                     where updated_at > now() - interval '48 hours' group by 1) y),
+    'completion', (select coalesce(json_agg(json_build_object('cats', c, 'voters', v) order by c), '[]'::json)
+               from (select c, count(*) v from (select count(*) c from public.votes group by voter_id) z group by c) w)
+  ) else null end
+$$;
+
+-- Removed category: "Most Disappointing Game"
+delete from public.votes      where category_id = 'most-disappointing-game';
+delete from public.categories where id = 'most-disappointing-game';
+
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';

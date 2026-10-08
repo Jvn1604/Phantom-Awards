@@ -93,7 +93,6 @@ const DEFAULTS=[
 ["Best Esports Game","Counter-Strike 2|League of Legends|Valorant|Dota 2"],
 ["Best Esports Athlete","Athlete A|Athlete B|Athlete C|Athlete D"],
 ["Best Esports Team","Team A|Team B|Team C|Team D"],
-["Most Disappointing Game","Nominee A|Nominee B|Nominee C|Nominee D"],
 ["Best Hidden Gem","TR-49|Wax Heads|Esoteric Ebb|Lost and Found Co."],
 ["Best Boss Fight","Nioh 3|Mina the Hollower|Saros|Resident Evil Requiem"],
 ["Hardest Game","Nioh 3|Beast of Reincarnation|Mortal Shell II|Code Vein II"],
@@ -128,7 +127,7 @@ window.addEventListener('error',e=>{fail('Script error: '+e.message);});
 
 const PAL=['#a855f7','#f5c542','#22d3ee','#f472b6','#34d399','#fb923c','#818cf8','#e9d5ff'];
 let CATS=[],NM={},T={},ov=null,cfg=null,sel=null,unknown=0,charts={},timer=null,tab='overview',filter='';
-const openSet=new Set();let VOT=[];
+const openSet=new Set();let VOT=[],COLLABS=[],revealAll=false;
 const sum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
 const toast=m=>{$('status').textContent=m;};
 
@@ -184,7 +183,7 @@ function shell(){
   app.innerHTML=`
   <div class="bar"><div><h1>Phantom Awards · Admin</h1><div id="status"></div></div>
    <div class="row"><label class="row"><input type="checkbox" id="auto" checked> auto-refresh</label>
-   <button id="rf">Refresh</button><button id="csv">Download CSV</button><button id="out">Sign out</button></div></div>
+   <button id="rf">Refresh</button><button id="bk">Backup JSON</button><button id="csv">Download CSV</button><button id="out">Sign out</button></div></div>
   <div class="tabs" id="tabs"></div>
 
   <section class="tab" id="t-overview">
@@ -195,6 +194,10 @@ function shell(){
     <div class="card"><h2>Share of votes</h2><div class="cv"><canvas id="c2"></canvas></div></div>
    </div>
    <div class="card"><h2>Votes over time</h2><div class="cv"><canvas id="c3"></canvas></div></div>
+   <div class="two">
+    <div class="card"><h2>Votes per hour (last 48h)</h2><div class="cv"><canvas id="c7"></canvas></div></div>
+    <div class="card"><h2>How many categories each voter finished</h2><div class="cv"><canvas id="c8"></canvas></div></div>
+   </div>
    <div class="card"><h2>Votes per category</h2><div class="cv" id="c4box"><canvas id="c4"></canvas></div></div>
    <div class="card"><div class="row" style="justify-content:space-between"><h2>All categories (click a row)</h2><input id="q" placeholder="Search category…"></div>
     <div class="scroll"><table><thead><tr><th>Category</th><th>Leader</th><th>Votes</th><th>Share</th><th>Lead</th><th>Total</th></tr></thead><tbody id="tb"></tbody></table></div></div>
@@ -218,9 +221,16 @@ function shell(){
 
   <section class="tab" id="t-voters">
    <div class="card"><div class="row" style="justify-content:space-between"><h2 id="vh">Voters</h2>
-    <div class="row"><input id="vq" placeholder="Search name or email…"><button id="vrand" class="gold">🎲 Pick random voter</button><button id="vcsv">Download voters CSV</button></div></div>
+    <div class="row"><input id="vq" placeholder="Search name or email…"><button id="vreveal">👁 Reveal all emails</button><button id="vrand" class="gold">🎲 Pick random voter</button><button id="vcsv">Download voters CSV</button></div></div>
     <p id="vpick" class="note"></p>
     <div class="scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Categories voted</th><th>Last vote</th><th></th></tr></thead><tbody id="vtb"></tbody></table></div></div>
+  </section>
+
+  <section class="tab" id="t-collabs">
+   <div class="card"><h2>Collab YouTube channels</h2>
+    <p class="note">These show on the public site under the 🤝 Collabs button. Add as many as you want. For each channel paste its YouTube link and a picture link, or upload the channel's profile picture.</p>
+    <div class="nom"><input class="nm" id="cn" placeholder="Channel name" type="text"><input class="u" id="cu" placeholder="https://www.youtube.com/@channel" type="text"><input class="u" id="ci" placeholder="Icon image link (optional)" type="text"><button class="sm gold" id="cadd">Add channel</button></div></div>
+   <div class="card"><div id="collabList"></div></div>
   </section>
 
   <section class="tab" id="t-mod">
@@ -234,6 +244,8 @@ function shell(){
   <section class="tab" id="t-set">
    <div class="card"><h2>Voting switches</h2><p id="phase"></p>
     <label class="chk" style="font-size:16px;color:var(--text)"><input type="checkbox" id="pz"> Pause voting for everyone (fans see "Voting is paused")</label></div>
+   <div class="card"><h2>Announcement banner</h2><p class="note">Shown at the top of the home page. Leave empty to hide it.</p>
+    <div class="row"><input id="ann" placeholder="e.g. Voting closes Sunday 11:59 PM!" style="flex:1;min-width:220px"><button id="annsv" class="gold">Save</button><button id="anncl">Clear</button></div></div>
    <div class="card"><h2>Event dates</h2>
     <div class="row">Voting closes <input type="datetime-local" id="ends"></div><br>
     <div class="row">Results reveal <input type="datetime-local" id="rev"></div><br>
@@ -241,7 +253,7 @@ function shell(){
     <p id="cfgmsg" class="note"></p></div>
   </section>`;
   const tb=$('tabs');
-  [['overview','Overview'],['races','Races & Wins'],['voters','Voters'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
+  [['overview','Overview'],['races','Races & Wins'],['voters','Voters'],['collabs','Collabs'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
     const b=el('button',k===tab?'on':'',l);b.dataset.k=k;b.onclick=()=>show(k);tb.append(b);});
   show(tab);
   $('rf').onclick=()=>refresh({editor:true});$('csv').onclick=csv;
@@ -251,6 +263,9 @@ function shell(){
   $('eq').oninput=e=>{const v=e.target.value.toLowerCase();document.querySelectorAll('#editor details').forEach(d=>{d.style.display=d.dataset.name.includes(v)?'':'none';});};
   $('addcat').onclick=addCat;
   $('vq').oninput=voters;
+  $('vreveal').onclick=()=>{revealAll=!revealAll;voters();};
+  $('bk').onclick=backup;$('cadd').onclick=addCollab;
+  $('annsv').onclick=()=>saveCfg({announcement:$('ann').value.trim()});$('anncl').onclick=()=>{$('ann').value='';saveCfg({announcement:''});};
   $('vrand').onclick=()=>{const g=VOT.filter(v=>v.email);if(!g.length){$('vpick').textContent='No Google voters yet.';return;}
     const v=g[Math.floor(Math.random()*g.length)];$('vpick').textContent='🎉 '+(v.name||'')+' — '+v.email;};
   $('vcsv').onclick=()=>{const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
@@ -273,19 +288,19 @@ function show(k){
 // ---------- data ----------
 async function refresh(o){
   o=o||{};toast('Loading…');
-  const [a,b,c,k,n,vt]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle(),
-    sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters')]);
-  const err=a.error||b.error||k.error||n.error||vt.error;
+  const [a,b,c,k,n,vt,cl]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle(),
+    sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters'),sb.from('collabs').select('*').order('sort')]);
+  const err=a.error||b.error||k.error||n.error||vt.error||cl.error;
   if(err){toast('Error: '+err.message+' (did you run the latest supabase-setup.sql?)');return;}
   CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,sort:m.sort,category_id:m.category_id}))}));
   NM={};CATS.forEach(c=>c.noms.forEach(m=>NM[m.id]=m));
   T={};unknown=0;
   (a.data||[]).forEach(r=>{if(NM[r.choice]&&NM[r.choice].category_id===r.category_id)(T[r.category_id]=T[r.category_id]||{})[r.choice]=r.votes;else unknown+=r.votes;});
-  ov=b.data;cfg=c.data;VOT=vt.data||[];
+  ov=b.data;cfg=c.data;VOT=vt.data||[];COLLABS=cl.data||[];
   if(!sel||!CATS.find(x=>x.id===sel))sel=CATS[0]?CATS[0].id:null;
   toast('Updated '+new Date().toLocaleTimeString());
-  seedBox();kpis();selCharts();timeChart();partChart();overviewTable();races();voters();modTargets();cfgView();
-  if(o.editor)editor();
+  seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();modTargets();cfgView();
+  if(o.editor){editor();collabsEditor();}
 }
 async function db(p,msg){
   const r=await p;
@@ -314,11 +329,11 @@ function kpis(){
   const tot=st.reduce((n,x)=>n+x.s.total,0);
   const top=[...st].sort((x,y)=>y.s.total-x.s.total)[0];
   const items=[['Voters',ov.voters],['Total votes',tot],['Avg categories / voter',ov.voters?(tot/ov.voters).toFixed(1):'0'],
-    ['Ties right now',st.filter(x=>x.s.tie).length],['Close races',st.filter(x=>!x.s.tie&&x.s.leadPct<thr).length],
+    ['Finished all categories',(ov.completion||[]).filter(x=>x.cats>=CATS.filter(c=>!c.hidden).length).reduce((n,x)=>n+x.voters,0)],['Ties right now',st.filter(x=>x.s.tie).length],['Close races',st.filter(x=>!x.s.tie&&x.s.leadPct<thr).length],
     ['Most voted',top?top.c.name:'-'],['Unrecognised votes',unknown]];
   const k=$('kpis');k.innerHTML='';
   items.forEach(([l,v])=>{const d=el('div','kpi');d.append(el('b',0,String(v)),el('span',0,l));k.append(d);});
-  k.children[5].firstChild.style.fontSize='16px';
+  k.children[6].firstChild.style.fontSize='16px';
 }
 function selCharts(){
   const s=$('cat');s.innerHTML='';CATS.forEach(c=>{const o=el('option',0,c.name);o.value=c.id;s.append(o);});
@@ -331,6 +346,14 @@ function selCharts(){
 function timeChart(){
   const d=ov.daily||[];let run=0;
   mk('c3',{type:'bar',data:{labels:d.map(x=>x.day),datasets:[{type:'bar',label:'Votes that day',data:d.map(x=>x.n),backgroundColor:'#a855f7'},{type:'line',label:'Cumulative',data:d.map(x=>run+=x.n),borderColor:'#f5c542',tension:.3}]},options:{scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+}
+function hourlyChart(){
+  const d=ov.hourly||[];
+  mk('c7',{type:'bar',data:{labels:d.map(x=>new Date(x.h).toLocaleString([],{day:'numeric',month:'short',hour:'2-digit'})),datasets:[{label:'Votes',data:d.map(x=>x.n),backgroundColor:'#22d3ee'}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+}
+function completionChart(){
+  const d=ov.completion||[];
+  mk('c8',{type:'bar',data:{labels:d.map(x=>x.cats+' cat.'),datasets:[{label:'Voters',data:d.map(x=>x.voters),backgroundColor:'#f5c542'}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 }
 function partChart(){
   const s=[...CATS].sort((x,y)=>sum(T[y.id])-sum(T[x.id]));
@@ -440,18 +463,64 @@ function editor(){
 }
 
 // ---------- voters ----------
+function maskEmail(e){const [l,d]=String(e||'').split('@');if(!d)return '••••••••';return (l.length>2?l.slice(0,2):l.slice(0,1))+'•'.repeat(Math.max(3,Math.min(8,l.length-1)))+'@'+d;}
 function voters(){
   const q=($('vq').value||'').toLowerCase();
   $('vh').textContent='Voters ('+VOT.length+')';
+  $('vreveal').textContent=revealAll?'🙈 Hide all emails':'👁 Reveal all emails';
   const tb=$('vtb');tb.innerHTML='';
   VOT.filter(v=>((v.name||'')+' '+(v.email||'')).toLowerCase().includes(q)).forEach(v=>{
     const tr=el('tr');
-    [v.name||'—',v.email||(v.is_anonymous?'(anonymous, before Google login)':'—'),v.votes,new Date(v.last_vote).toLocaleString()].forEach(x=>tr.append(el('td',0,String(x))));
+    tr.append(el('td',0,v.name||'—'));
+    const te=el('td');
+    if(v.email){
+      let shown=revealAll;const sp=el('span',0,shown?v.email:maskEmail(v.email)),eye=el('button','sm',shown?'🙈':'👁');
+      eye.style.marginLeft='8px';eye.title='Show / hide email';
+      eye.onclick=()=>{shown=!shown;sp.textContent=shown?v.email:maskEmail(v.email);eye.textContent=shown?'🙈':'👁';};
+      te.append(sp,eye);
+    }else te.textContent=v.is_anonymous?'(anonymous, before Google login)':'—';
+    tr.append(te,el('td',0,String(v.votes)),el('td',0,new Date(v.last_vote).toLocaleString()));
     const td=el('td');const b=el('button','sm red','Delete votes');
-    b.onclick=async()=>{if(!confirm('Delete all votes by '+(v.email||'this voter')+'?'))return;
+    b.onclick=async()=>{if(!confirm('Delete all votes by '+(v.email?maskEmail(v.email):'this voter')+'?'))return;
       const r=await sb.rpc('admin_delete_votes',{scope:'voter',target:v.voter_id});
       toast(r.error?r.error.message:'Deleted '+r.data+' votes');refresh({editor:false});};
     td.append(b);tr.append(td);tb.append(tr);});
+}
+
+// ---------- collabs ----------
+function collabsEditor(){
+  const root=$('collabList');root.innerHTML='';
+  if(!COLLABS.length)root.append(el('p','note','No collab channels yet. Add the first one above.'));
+  COLLABS.forEach((c,i)=>{
+    const row=el('div','nom');
+    const th=el('img','thumb');th.style.cssText='width:44px;height:44px;border-radius:50%';if(c.icon_url)th.src=c.icon_url;
+    const name=el('input','nm');name.type='text';name.value=c.name;
+    const url=el('input','u');url.type='text';url.value=c.url;
+    const ic=el('input','u');ic.type='text';ic.value=c.icon_url||'';ic.placeholder='Icon image link';
+    const file=el('input');file.type='file';file.accept='image/*';file.style.display='none';
+    const upl=el('button','sm','Upload icon');upl.onclick=()=>file.click();
+    file.onchange=async()=>{if(!file.files[0])return;toast('Uploading…');
+      try{ic.value=await uploadImg(file.files[0],'collab-'+c.id);th.src=ic.value;
+        db(sb.from('collabs').update({name:name.value.trim(),url:url.value.trim(),icon_url:ic.value}).eq('id',c.id),'Icon saved');}
+      catch(e){toast('Upload failed: '+(e.message||e));}};
+    const sv=el('button','sm gold','Save');sv.onclick=()=>db(sb.from('collabs').update({name:name.value.trim(),url:url.value.trim(),icon_url:ic.value.trim()||null}).eq('id',c.id));
+    const up=el('button','sm','↑');up.onclick=()=>swap('collabs',c,COLLABS[i-1]);
+    const dn=el('button','sm','↓');dn.onclick=()=>swap('collabs',c,COLLABS[i+1]);
+    const del=el('button','sm red','Remove');del.onclick=()=>{if(confirm('Remove "'+c.name+'"?'))db(sb.from('collabs').delete().eq('id',c.id),'Removed');};
+    row.append(th,name,url,ic,file,upl,sv,up,dn,del);root.append(row);
+  });
+}
+async function addCollab(){
+  const name=$('cn').value.trim(),url=$('cu').value.trim();
+  if(!name||!url){toast('Enter a channel name and its YouTube link.');return;}
+  if(await db(sb.from('collabs').insert({name,url,icon_url:$('ci').value.trim()||null,sort:Math.max(0,...COLLABS.map(c=>c.sort))+1}),'Channel added')){$('cn').value=$('cu').value=$('ci').value='';}
+}
+
+// ---------- backup ----------
+function backup(){
+  const data={exportedAt:new Date().toISOString(),config:cfg,categories:CATS,collabs:COLLABS,totals:T,voterCount:VOT.length};
+  const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  l.download='phantom-awards-backup.json';l.click();
 }
 
 // ---------- moderation ----------
@@ -475,7 +544,7 @@ const iso=v=>v?new Date(v).toISOString():undefined;
 const loc=i=>{const d=new Date(i);return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);};
 function cfgView(){
   if(!cfg)return;
-  $('ends').value=loc(cfg.voting_ends);$('rev').value=loc(cfg.reveal_at);$('pz').checked=!!cfg.paused;
+  $('ends').value=loc(cfg.voting_ends);$('rev').value=loc(cfg.reveal_at);$('pz').checked=!!cfg.paused;$('ann').value=cfg.announcement||'';
   const n=Date.now(),p=n<new Date(cfg.voting_ends)?(cfg.paused?'Voting is PAUSED':'Voting is OPEN'):n<new Date(cfg.reveal_at)?'Voting CLOSED, results hidden':'Results are LIVE';
   $('phase').textContent='';$('phase').append(el('span','pill',p));
 }
