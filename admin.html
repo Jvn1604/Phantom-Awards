@@ -215,7 +215,7 @@ function shell(){
 
   <section class="tab" id="t-editor">
    <div class="card"><div class="row"><input id="newcat" placeholder="New category name" style="flex:1;min-width:200px"><button class="gold" id="addcat">+ Add category</button><button id="syncpics" title="Copy a picture to every nominee with the same game name that has none">🔁 Sync pictures (same game name)</button><input id="eq" placeholder="Search…"></div>
-   <p class="note">Hidden = not shown to fans at all. Closed = visible but voting is off for that category. Upload a picture or paste an image link for each nominee. If the same game appears in several categories, a picture you set for one is applied to all of them automatically. Use images you have the right to use (official press kits are usually fine).</p></div>
+   <p class="note">Hidden = not shown to fans at all. Closed = visible but voting is off for that category. Upload a picture or paste an image link for each nominee. If the same game appears in several categories, a picture you set for one is applied to all of them automatically. Add a trailer or info link to show a ▶ Trailer button on the nominee card (YouTube links play inside the site). Use images you have the right to use (official press kits are usually fine).</p></div>
    <div id="editor"></div>
   </section>
 
@@ -244,6 +244,12 @@ function shell(){
   <section class="tab" id="t-set">
    <div class="card"><h2>Voting switches</h2><p id="phase"></p>
     <label class="chk" style="font-size:16px;color:var(--text)"><input type="checkbox" id="pz"> Pause voting for everyone (fans see "Voting is paused")</label></div>
+   <div class="card"><h2>Discord milestone alerts</h2>
+    <p class="note">Get a message in your Discord channel when the number of voters hits a milestone. In Discord: Server Settings → Integrations → Webhooks → New Webhook → pick a channel → Copy Webhook URL. The URL is stored privately and can never be read back by the website.</p>
+    <div class="row"><input id="dcw" type="password" placeholder="https://discord.com/api/webhooks/..." style="flex:1;min-width:240px"></div><br>
+    <div class="row">Milestones (voters): <input id="dcm" placeholder="10, 25, 50, 100, 250" style="flex:1;min-width:200px"><label class="chk"><input type="checkbox" id="dcen"> alerts on</label></div><br>
+    <div class="row"><button id="dcsave" class="gold">Save</button><button id="dctest">Send test message</button><button id="dcreset">Re-announce from the start</button><button id="dcrm" class="red">Remove webhook</button></div>
+    <p id="dcst" class="note"></p></div>
    <div class="card"><h2>Announcement banner</h2><p class="note">Shown at the top of the home page. Leave empty to hide it.</p>
     <div class="row"><input id="ann" placeholder="e.g. Voting closes Sunday 11:59 PM!" style="flex:1;min-width:220px"><button id="annsv" class="gold">Save</button><button id="anncl">Clear</button></div></div>
    <div class="card"><h2>Event dates</h2>
@@ -265,6 +271,8 @@ function shell(){
   $('vq').oninput=voters;
   $('vreveal').onclick=()=>{revealAll=!revealAll;voters();};
   $('bk').onclick=backup;$('cadd').onclick=addCollab;
+  $('dcsave').onclick=()=>alertsSave();$('dcreset').onclick=()=>alertsSave({p_reset:true});$('dcrm').onclick=()=>{if(confirm('Remove the saved webhook?'))alertsSave({p_webhook:''});};
+  $('dctest').onclick=async()=>{const r=await sb.rpc('admin_test_discord');$('dcst').textContent=r.error?'Error: '+r.error.message:'Test message sent. Check your Discord channel.';};
   $('annsv').onclick=()=>saveCfg({announcement:$('ann').value.trim()});$('anncl').onclick=()=>{$('ann').value='';saveCfg({announcement:''});};
   $('vrand').onclick=()=>{const g=VOT.filter(v=>v.email);if(!g.length){$('vpick').textContent='No Google voters yet.';return;}
     const v=g[Math.floor(Math.random()*g.length)];$('vpick').textContent='🎉 '+(v.name||'')+' — '+v.email;};
@@ -292,14 +300,14 @@ async function refresh(o){
     sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters'),sb.from('collabs').select('*').order('sort')]);
   const err=a.error||b.error||k.error||n.error||vt.error||cl.error;
   if(err){toast('Error: '+err.message+' (did you run the latest supabase-setup.sql?)');return;}
-  CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,sort:m.sort,category_id:m.category_id}))}));
+  CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,link:m.link_url,sort:m.sort,category_id:m.category_id}))}));
   NM={};CATS.forEach(c=>c.noms.forEach(m=>NM[m.id]=m));
   T={};unknown=0;
   (a.data||[]).forEach(r=>{if(NM[r.choice]&&NM[r.choice].category_id===r.category_id)(T[r.category_id]=T[r.category_id]||{})[r.choice]=r.votes;else unknown+=r.votes;});
   ov=b.data;cfg=c.data;VOT=vt.data||[];COLLABS=cl.data||[];
   if(!sel||!CATS.find(x=>x.id===sel))sel=CATS[0]?CATS[0].id:null;
   toast('Updated '+new Date().toLocaleTimeString());
-  seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();modTargets();cfgView();
+  seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();modTargets();cfgView();alertsLoad();
   if(o.editor){editor();collabsEditor();}
 }
 async function db(p,msg){
@@ -413,35 +421,43 @@ async function uploadImg(file,id){
   return sb.storage.from('nominee-images').getPublicUrl(path).data.publicUrl;
 }
 const nkey=s=>String(s||'').trim().toLowerCase();
-function imageFor(name,exceptId){
+function sharedFor(name,field,exceptId){
   const k=nkey(name);
-  for(const c of CATS)for(const m of c.noms)if(m.id!==exceptId&&nkey(m.name)===k&&m.img)return m.img;
+  for(const c of CATS)for(const m of c.noms)if(m.id!==exceptId&&nkey(m.name)===k&&m[field])return m[field];
   return null;
 }
-async function propagate(name,url,exceptId){      // same game name in other categories gets the same picture
-  const ids=[];CATS.forEach(c=>c.noms.forEach(m=>{if(m.id!==exceptId&&nkey(m.name)===nkey(name)&&m.img!==url)ids.push(m.id);}));
+const imageFor=(n,e)=>sharedFor(n,'img',e),linkFor=(n,e)=>sharedFor(n,'link',e);
+async function propagate(name,field,val,exceptId){      // same game name in other categories gets the same picture / link
+  const col=field==='img'?'image_url':'link_url',ids=[];
+  CATS.forEach(c=>c.noms.forEach(m=>{if(m.id!==exceptId&&nkey(m.name)===nkey(name)&&m[field]!==val)ids.push(m.id);}));
   if(!ids.length)return 0;
-  const r=await sb.from('nominees').update({image_url:url}).in('id',ids);
+  const r=await sb.from('nominees').update({[col]:val}).in('id',ids);
   if(r.error){toast('Error: '+r.error.message);return 0;}
   return ids.length;
 }
-async function saveNominee(n,nameVal,urlVal,msg){
-  nameVal=nameVal.trim();urlVal=(urlVal||'').trim();
-  let img=urlVal||null,note='';
+async function saveNominee(n,nameVal,urlVal,linkVal,msg){
+  nameVal=nameVal.trim();urlVal=(urlVal||'').trim();linkVal=(linkVal||'').trim();
+  let img=urlVal||null,lk=linkVal||null,note='';
   if(!img&&!n.img){const ex=imageFor(nameVal,n.id);if(ex){img=ex;note=' (picture copied from the same game)';}}
-  const r=await sb.from('nominees').update({name:nameVal,image_url:img}).eq('id',n.id);
-  if(r.error){toast('Error: '+r.error.message);return;}
-  let cnt=0;if(img&&img!==n.img)cnt=await propagate(nameVal,img,n.id);
-  toast((msg||'Saved')+note+(cnt?' · same picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
+  if(!lk&&!n.link){const ex=linkFor(nameVal,n.id);if(ex){lk=ex;note+=' (link copied from the same game)';}}
+  const r=await sb.from('nominees').update({name:nameVal,image_url:img,link_url:lk}).eq('id',n.id);
+  if(r.error){toast('Error: '+r.error.message+' (run the latest supabase-setup.sql?)');return;}
+  let c1=0,c2=0;
+  if(img&&img!==n.img)c1=await propagate(nameVal,'img',img,n.id);
+  if(lk&&lk!==n.link)c2=await propagate(nameVal,'link',lk,n.id);
+  const cnt=Math.max(c1,c2);
+  toast((msg||'Saved')+note+(cnt?' · same picture/link applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
   await refresh({editor:true});
 }
-async function syncPics(){                         // fill missing pictures for same-name nominees
+async function syncPics(){                         // fill missing pictures and links for same-name nominees
   const G={};CATS.forEach(c=>c.noms.forEach(m=>{(G[nkey(m.name)]=G[nkey(m.name)]||[]).push(m);}));
   let n=0;
-  for(const k in G){const g=G[k],src=g.find(m=>m.img);if(!src)continue;
-    const ids=g.filter(m=>!m.img).map(m=>m.id);
-    if(ids.length){const r=await sb.from('nominees').update({image_url:src.img}).in('id',ids);if(!r.error)n+=ids.length;}}
-  toast(n?'Copied pictures to '+n+' nominees.':'Everything already matches.');
+  for(const k in G){const g=G[k];
+    for(const [f,col] of [['img','image_url'],['link','link_url']]){
+      const src=g.find(m=>m[f]);if(!src)continue;
+      const ids=g.filter(m=>!m[f]).map(m=>m.id);
+      if(ids.length){const r=await sb.from('nominees').update({[col]:src[f]}).in('id',ids);if(!r.error)n+=ids.length;}}}
+  toast(n?'Copied '+n+' missing pictures/links.':'Everything already matches.');
   await refresh({editor:true});
 }
 function chk(label,val){const l=el('label','chk');const i=el('input');i.type='checkbox';i.checked=!!val;l.append(i,label);return {l,i};}
@@ -468,33 +484,35 @@ function editor(){
       const th=el('img','thumb');if(n.img)th.src=n.img;
       const name=el('input','nm');name.type='text';name.value=n.name;name.placeholder='Nominee name';
       const url=el('input','u');url.type='text';url.value=n.img||'';url.placeholder='Image link (or use Upload)';
+      const lk=el('input','u');lk.type='text';lk.value=n.link||'';lk.placeholder='Trailer / info link (YouTube etc.)';
       const file=el('input');file.type='file';file.accept='image/*';file.style.display='none';
       const upl=el('button','sm','Upload');upl.onclick=()=>file.click();
       file.onchange=async()=>{if(!file.files[0])return;toast('Uploading…');
         try{url.value=await uploadImg(file.files[0],n.id);th.src=url.value;
-          saveNominee(n,name.value,url.value,'Picture saved');}
+          saveNominee(n,name.value,url.value,lk.value,'Picture saved');}
         catch(e){toast('Upload failed: '+(e.message||e));}};
-      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,name.value,url.value,'Saved');};
+      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null,link_url:lk.value.trim()||null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,name.value,url.value,lk.value,'Saved');};
       const u2=el('button','sm','↑');u2.onclick=()=>swap('nominees',n,c.noms[ni-1]);
       const d2=el('button','sm','↓');d2.onclick=()=>swap('nominees',n,c.noms[ni+1]);
       const x=el('button','sm red','Delete');x.onclick=async()=>{
         if(!confirm('Delete nominee "'+n.name+'" and its votes?'))return;
         await sb.rpc('admin_delete_votes',{scope:'nominee',target:n.id});
         db(sb.from('nominees').delete().eq('id',n.id),'Nominee deleted');};
-      row.append(th,name,url,file,upl,s2,u2,d2,x);body.append(row);
+      row.append(th,name,url,lk,file,upl,s2,u2,d2,x);body.append(row);
     });
     const add=el('div','nom');
     const an=el('input','nm');an.type='text';an.placeholder='+ New nominee name';
     const au=el('input','u');au.type='text';au.placeholder='Image link (optional; you can upload after adding)';
+    const alk=el('input','u');alk.type='text';alk.placeholder='Trailer / info link (optional)';
     const ab=el('button','sm gold','Add nominee');
     ab.onclick=async()=>{const v=an.value.trim();if(!v)return;openSet.add(c.id);
-      const given=au.value.trim()||null,img=given||imageFor(v)||null;
-      const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
+      const given=au.value.trim()||null,img=given||imageFor(v)||null,givenL=alk.value.trim()||null,lnk=givenL||linkFor(v)||null;
+      const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,link_url:lnk,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
       if(r.error){toast('Error: '+r.error.message);return;}
-      const cnt=given?await propagate(v,given,null):0;
+      const cnt=Math.max(given?await propagate(v,'img',given,null):0,givenL?await propagate(v,'link',givenL,null):0);
       toast('Nominee added'+(!given&&img?' (picture copied from the same game)':'')+(cnt?' · picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
       await refresh({editor:true});};
-    add.append(an,au,ab);body.append(add);
+    add.append(an,au,alk,ab);body.append(add);
     d.append(body);root.append(d);
   });
 }
@@ -577,6 +595,22 @@ async function delVotes(){
 }
 
 // ---------- settings ----------
+async function alertsLoad(){
+  if(!$('dcst'))return;
+  const r=await sb.rpc('admin_get_alerts');
+  if(r.error||!r.data){$('dcst').textContent='Run the latest supabase-setup.sql to enable Discord alerts'+(r.error?' ('+r.error.message+')':'.');return;}
+  const d=r.data;
+  $('dcen').checked=!!d.enabled;$('dcm').value=(d.milestones||[]).join(', ');
+  $('dcst').textContent=(d.has_webhook?'Webhook saved ✓. ':'No webhook saved yet. ')+'Last milestone announced: '+(d.last_milestone||0);
+  $('dcw').placeholder=d.has_webhook?'Saved (hidden). Paste a new URL to replace it':'https://discord.com/api/webhooks/...';
+}
+async function alertsSave(extra){
+  const ms=($('dcm').value||'').split(/[ ,]+/).map(Number).filter(n=>n>0).sort((x,y)=>x-y);
+  const w=$('dcw').value.trim();
+  const r=await sb.rpc('admin_set_alerts',Object.assign({p_webhook:w||null,p_enabled:$('dcen').checked,p_milestones:ms.length?ms:null,p_reset:false},extra||{}));
+  $('dcst').textContent=r.error?'Error: '+r.error.message:'Saved.';
+  if(!r.error){$('dcw').value='';setTimeout(alertsLoad,300);}
+}
 const iso=v=>v?new Date(v).toISOString():undefined;
 const loc=i=>{const d=new Date(i);return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);};
 function cfgView(){

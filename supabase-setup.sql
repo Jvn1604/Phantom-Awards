@@ -256,5 +256,86 @@ $$;
 delete from public.votes      where category_id = 'most-disappointing-game';
 delete from public.categories where id = 'most-disappointing-game';
 
+-- =====================================================================
+-- 9) TRAILER LINKS + DISCORD MILESTONE ALERTS
+-- =====================================================================
+alter table public.nominees add column if not exists link_url text;
+
+create extension if not exists pg_net with schema extensions;
+
+-- Secret settings live here. No policies = the website can never read this table (it holds your webhook).
+create table if not exists public.admin_secrets (
+  id             int primary key default 1 check (id = 1),
+  discord_webhook text,
+  enabled        boolean not null default true,
+  milestones     int[] not null default '{10,25,50,100,250,500,1000}',
+  last_milestone int not null default 0
+);
+insert into public.admin_secrets (id) values (1) on conflict (id) do nothing;
+alter table public.admin_secrets enable row level security;
+
+create or replace function public.admin_get_alerts() returns json
+language sql security definer set search_path = public as $$
+  select case when public.is_admin() then (
+    select json_build_object('has_webhook', coalesce(discord_webhook, '') <> '', 'enabled', enabled,
+                             'milestones', milestones, 'last_milestone', last_milestone)
+    from public.admin_secrets where id = 1) else null end
+$$;
+
+create or replace function public.admin_set_alerts(p_webhook text, p_enabled boolean, p_milestones int[], p_reset boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if p_webhook is not null and p_webhook <> '' and p_webhook !~ '^https://(discord|discordapp)\.com/api/webhooks/' then
+    raise exception 'That does not look like a Discord webhook URL';
+  end if;
+  update public.admin_secrets set
+    discord_webhook = case when p_webhook is null then discord_webhook when p_webhook = '' then null else p_webhook end,
+    enabled         = coalesce(p_enabled, enabled),
+    milestones      = coalesce(p_milestones, milestones),
+    last_milestone  = case when p_reset then 0 else last_milestone end
+  where id = 1;
+end $$;
+
+create or replace function public.admin_test_discord() returns void
+language plpgsql security definer set search_path = public, extensions, net as $$
+declare w text;
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  select discord_webhook into w from public.admin_secrets where id = 1;
+  if w is null or w = '' then raise exception 'Save a Discord webhook first'; end if;
+  perform net.http_post(url := w, headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object('content', '✅ Phantom Awards alerts are connected.'));
+end $$;
+
+-- Fires when a NEW voter casts their first vote; announces each milestone once.
+create or replace function public.notify_milestone() returns trigger
+language plpgsql security definer set search_path = public, extensions, net as $$
+declare s record; voters int; m int;
+begin
+  if (select count(*) from public.votes where voter_id = new.voter_id) <> 1 then return new; end if;
+  select * into s from public.admin_secrets where id = 1;
+  if s.discord_webhook is null or s.discord_webhook = '' or not s.enabled then return new; end if;
+  select count(distinct voter_id) into voters from public.votes;
+  foreach m in array s.milestones loop
+    if voters >= m and m > s.last_milestone then
+      perform net.http_post(url := s.discord_webhook, headers := '{"Content-Type":"application/json"}'::jsonb,
+        body := jsonb_build_object('content', '🎉 **Phantom Awards 2026**: ' || m || ' voters have joined! (' || voters || ' so far)'));
+      update public.admin_secrets set last_milestone = m where id = 1;
+      s.last_milestone := m;
+    end if;
+  end loop;
+  return new;
+exception when others then
+  return new;   -- an alert problem must never block a vote
+end $$;
+
+drop trigger if exists votes_milestone on public.votes;
+create trigger votes_milestone after insert on public.votes
+  for each row execute function public.notify_milestone();
+
+revoke execute on function public.admin_get_alerts(), public.admin_set_alerts(text, boolean, int[], boolean), public.admin_test_discord() from public, anon;
+grant execute on function public.admin_get_alerts(), public.admin_set_alerts(text, boolean, int[], boolean), public.admin_test_discord() to authenticated;
+
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';
