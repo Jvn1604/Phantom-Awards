@@ -214,8 +214,8 @@ function shell(){
   </section>
 
   <section class="tab" id="t-editor">
-   <div class="card"><div class="row"><input id="newcat" placeholder="New category name" style="flex:1;min-width:200px"><button class="gold" id="addcat">+ Add category</button><input id="eq" placeholder="Search…"></div>
-   <p class="note">Hidden = not shown to fans at all. Closed = visible but voting is off for that category. Upload a picture or paste an image link for each nominee. Use images you have the right to use (official press kits are usually fine).</p></div>
+   <div class="card"><div class="row"><input id="newcat" placeholder="New category name" style="flex:1;min-width:200px"><button class="gold" id="addcat">+ Add category</button><button id="syncpics" title="Copy a picture to every nominee with the same game name that has none">🔁 Sync pictures (same game name)</button><input id="eq" placeholder="Search…"></div>
+   <p class="note">Hidden = not shown to fans at all. Closed = visible but voting is off for that category. Upload a picture or paste an image link for each nominee. If the same game appears in several categories, a picture you set for one is applied to all of them automatically. Use images you have the right to use (official press kits are usually fine).</p></div>
    <div id="editor"></div>
   </section>
 
@@ -261,7 +261,7 @@ function shell(){
   $('q').oninput=e=>{filter=e.target.value.toLowerCase();overviewTable();};
   $('thr').oninput=races;
   $('eq').oninput=e=>{const v=e.target.value.toLowerCase();document.querySelectorAll('#editor details').forEach(d=>{d.style.display=d.dataset.name.includes(v)?'':'none';});};
-  $('addcat').onclick=addCat;
+  $('addcat').onclick=addCat;$('syncpics').onclick=syncPics;
   $('vq').oninput=voters;
   $('vreveal').onclick=()=>{revealAll=!revealAll;voters();};
   $('bk').onclick=backup;$('cadd').onclick=addCollab;
@@ -412,6 +412,38 @@ async function uploadImg(file,id){
   if(error)throw error;
   return sb.storage.from('nominee-images').getPublicUrl(path).data.publicUrl;
 }
+const nkey=s=>String(s||'').trim().toLowerCase();
+function imageFor(name,exceptId){
+  const k=nkey(name);
+  for(const c of CATS)for(const m of c.noms)if(m.id!==exceptId&&nkey(m.name)===k&&m.img)return m.img;
+  return null;
+}
+async function propagate(name,url,exceptId){      // same game name in other categories gets the same picture
+  const ids=[];CATS.forEach(c=>c.noms.forEach(m=>{if(m.id!==exceptId&&nkey(m.name)===nkey(name)&&m.img!==url)ids.push(m.id);}));
+  if(!ids.length)return 0;
+  const r=await sb.from('nominees').update({image_url:url}).in('id',ids);
+  if(r.error){toast('Error: '+r.error.message);return 0;}
+  return ids.length;
+}
+async function saveNominee(n,nameVal,urlVal,msg){
+  nameVal=nameVal.trim();urlVal=(urlVal||'').trim();
+  let img=urlVal||null,note='';
+  if(!img&&!n.img){const ex=imageFor(nameVal,n.id);if(ex){img=ex;note=' (picture copied from the same game)';}}
+  const r=await sb.from('nominees').update({name:nameVal,image_url:img}).eq('id',n.id);
+  if(r.error){toast('Error: '+r.error.message);return;}
+  let cnt=0;if(img&&img!==n.img)cnt=await propagate(nameVal,img,n.id);
+  toast((msg||'Saved')+note+(cnt?' · same picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
+  await refresh({editor:true});
+}
+async function syncPics(){                         // fill missing pictures for same-name nominees
+  const G={};CATS.forEach(c=>c.noms.forEach(m=>{(G[nkey(m.name)]=G[nkey(m.name)]||[]).push(m);}));
+  let n=0;
+  for(const k in G){const g=G[k],src=g.find(m=>m.img);if(!src)continue;
+    const ids=g.filter(m=>!m.img).map(m=>m.id);
+    if(ids.length){const r=await sb.from('nominees').update({image_url:src.img}).in('id',ids);if(!r.error)n+=ids.length;}}
+  toast(n?'Copied pictures to '+n+' nominees.':'Everything already matches.');
+  await refresh({editor:true});
+}
 function chk(label,val){const l=el('label','chk');const i=el('input');i.type='checkbox';i.checked=!!val;l.append(i,label);return {l,i};}
 function editor(){
   const root=$('editor');root.innerHTML='';
@@ -440,9 +472,9 @@ function editor(){
       const upl=el('button','sm','Upload');upl.onclick=()=>file.click();
       file.onchange=async()=>{if(!file.files[0])return;toast('Uploading…');
         try{url.value=await uploadImg(file.files[0],n.id);th.src=url.value;
-          db(sb.from('nominees').update({name:name.value.trim(),image_url:url.value}).eq('id',n.id),'Picture saved');}
+          saveNominee(n,name.value,url.value,'Picture saved');}
         catch(e){toast('Upload failed: '+(e.message||e));}};
-      const s2=el('button','sm gold','Save');s2.onclick=()=>db(sb.from('nominees').update({name:name.value.trim(),image_url:url.value.trim()||null}).eq('id',n.id));
+      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,name.value,url.value,'Saved');};
       const u2=el('button','sm','↑');u2.onclick=()=>swap('nominees',n,c.noms[ni-1]);
       const d2=el('button','sm','↓');d2.onclick=()=>swap('nominees',n,c.noms[ni+1]);
       const x=el('button','sm red','Delete');x.onclick=async()=>{
@@ -455,8 +487,13 @@ function editor(){
     const an=el('input','nm');an.type='text';an.placeholder='+ New nominee name';
     const au=el('input','u');au.type='text';au.placeholder='Image link (optional; you can upload after adding)';
     const ab=el('button','sm gold','Add nominee');
-    ab.onclick=()=>{const v=an.value.trim();if(!v)return;openSet.add(c.id);
-      db(sb.from('nominees').insert({category_id:c.id,name:v,image_url:au.value.trim()||null,sort:Math.max(0,...c.noms.map(m=>m.sort))+1}),'Nominee added');};
+    ab.onclick=async()=>{const v=an.value.trim();if(!v)return;openSet.add(c.id);
+      const given=au.value.trim()||null,img=given||imageFor(v)||null;
+      const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
+      if(r.error){toast('Error: '+r.error.message);return;}
+      const cnt=given?await propagate(v,given,null):0;
+      toast('Nominee added'+(!given&&img?' (picture copied from the same game)':'')+(cnt?' · picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
+      await refresh({editor:true});};
     add.append(an,au,ab);body.append(add);
     d.append(body);root.append(d);
   });
