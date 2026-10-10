@@ -337,5 +337,89 @@ create trigger votes_milestone after insert on public.votes
 revoke execute on function public.admin_get_alerts(), public.admin_set_alerts(text, boolean, int[], boolean), public.admin_test_discord() from public, anon;
 grant execute on function public.admin_get_alerts(), public.admin_set_alerts(text, boolean, int[], boolean), public.admin_test_discord() to authenticated;
 
+-- =====================================================================
+-- 10) PREDICTIONS GAME, NOMINEE DESCRIPTIONS, HOME SECTIONS
+-- =====================================================================
+alter table public.nominees   add column if not exists description text;
+alter table public.categories add column if not exists grp text;   -- main | genres | gameplay | fun (empty = automatic)
+
+create table if not exists public.predictions (
+  voter_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  category_id text not null references public.categories(id) on delete cascade,
+  nominee_id  text not null,
+  updated_at  timestamptz not null default now(),
+  primary key (voter_id, category_id)
+);
+alter table public.predictions enable row level security;
+drop policy if exists "read own predictions"   on public.predictions;
+drop policy if exists "insert own predictions" on public.predictions;
+drop policy if exists "update own predictions" on public.predictions;
+drop policy if exists "delete own predictions" on public.predictions;
+create policy "read own predictions" on public.predictions for select using (auth.uid() = voter_id);
+create policy "insert own predictions" on public.predictions for insert with check (
+  auth.uid() = voter_id
+  and now() < (select voting_ends from public.config)
+  and coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false
+  and exists (select 1 from public.categories c where c.id = predictions.category_id and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = predictions.category_id and n.id::text = predictions.nominee_id));
+create policy "update own predictions" on public.predictions for update
+  using (auth.uid() = voter_id)
+  with check (
+  auth.uid() = voter_id
+  and now() < (select voting_ends from public.config)
+  and exists (select 1 from public.nominees n where n.category_id = predictions.category_id and n.id::text = predictions.nominee_id));
+create policy "delete own predictions" on public.predictions for delete
+  using (auth.uid() = voter_id and now() < (select voting_ends from public.config));
+
+-- Leaderboard: unlocks at reveal time. 10 points per correct prediction (a prediction is correct if it matches
+-- the community winner; ties count for every tied leader). Names are shown as first name + initial.
+create or replace function public.get_leaderboard()
+returns table (pos int, name text, points int, correct int, total int, is_me boolean)
+language sql security definer set search_path = public, auth as $$
+  with tot as (select v.category_id, v.choice, count(*) c from public.votes v group by 1, 2),
+  mx  as (select category_id, max(c) m from tot group by 1),
+  win as (select t.category_id, t.choice from tot t join mx on mx.category_id = t.category_id and t.c = mx.m),
+  pr  as (
+    select p.voter_id, count(*)::int n, count(w.choice)::int ok
+    from public.predictions p
+    join public.categories c on c.id = p.category_id and not c.hidden
+    left join win w on w.category_id = p.category_id and w.choice = p.nominee_id
+    group by p.voter_id),
+  named as (
+    select pr.voter_id, pr.n, pr.ok,
+      coalesce(nullif(trim(split_part(coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name', ''), ' ', 1)), '')
+        || case when split_part(coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name', ''), ' ', 2) <> ''
+                then ' ' || left(split_part(coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name', ''), ' ', 2), 1) || '.'
+                else '' end, 'Player') as nm
+    from pr join auth.users u on u.id = pr.voter_id),
+  ranked as (select named.*, (rank() over (order by ok desc, n asc))::int rk from named)
+  select r.rk, r.nm, r.ok * 10, r.ok, r.n, (r.voter_id = auth.uid())
+  from ranked r
+  where now() >= (select reveal_at from public.config) and (r.rk <= 20 or r.voter_id = auth.uid())
+  order by r.rk, r.nm
+$$;
+revoke execute on function public.get_leaderboard() from public, anon;
+grant execute on function public.get_leaderboard() to authenticated;
+
+-- Moderation delete now also clears predictions
+create or replace function public.admin_delete_votes(scope text, target text default null)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if scope = 'all' then delete from public.votes where true; delete from public.predictions where true;
+  elsif scope = 'category' then delete from public.votes where category_id = target; delete from public.predictions where category_id = target;
+  elsif scope = 'nominee' then delete from public.votes where choice = target; delete from public.predictions where nominee_id = target;
+  elsif scope = 'voter' then delete from public.votes where voter_id = target::uuid; delete from public.predictions where voter_id = target::uuid;
+  elsif scope = 'invalid' then
+    delete from public.votes v where not exists
+      (select 1 from public.nominees x where x.category_id = v.category_id and x.id::text = v.choice);
+  else raise exception 'bad scope'; end if;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke execute on function public.admin_delete_votes(text, text) from public, anon;
+grant execute on function public.admin_delete_votes(text, text) to authenticated;
+
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';

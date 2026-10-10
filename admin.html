@@ -233,6 +233,14 @@ function shell(){
    <div class="card"><div id="collabList"></div></div>
   </section>
 
+  <section class="tab" id="t-export">
+   <div class="card"><h2>Winners graphics for your video</h2>
+    <p class="note">Makes a 1920×1080 card for every category that has votes: category, winner picture, winner name, percentage and runner-ups. Cards are in reveal order (Game of the Year last). You can export before the public reveal. Pictures from other websites may not load; pictures you uploaded in the admin always do.</p>
+    <div class="row"><button class="gold" id="xzip">Download all PNGs (ZIP)</button><button id="xppt">Download PowerPoint (.pptx)</button></div>
+    <p id="xmsg" class="note"></p></div>
+   <div class="card"><div class="scroll"><table><thead><tr><th>Category</th><th>Winner</th><th>Votes</th><th></th></tr></thead><tbody id="xtb"></tbody></table></div></div>
+  </section>
+
   <section class="tab" id="t-mod">
    <div class="card"><h2>Delete votes (spam / testing)</h2>
     <div class="row"><select id="mscope"><option value="all">All votes</option><option value="category">One category</option><option value="nominee">One nominee</option><option value="invalid">Invalid votes only</option></select>
@@ -259,7 +267,7 @@ function shell(){
     <p id="cfgmsg" class="note"></p></div>
   </section>`;
   const tb=$('tabs');
-  [['overview','Overview'],['races','Races & Wins'],['voters','Voters'],['collabs','Collabs'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
+  [['overview','Overview'],['races','Races & Wins'],['voters','Voters'],['export','Winners export'],['collabs','Collabs'],['editor','Nominees & Categories'],['mod','Moderation'],['set','Settings']].forEach(([k,l])=>{
     const b=el('button',k===tab?'on':'',l);b.dataset.k=k;b.onclick=()=>show(k);tb.append(b);});
   show(tab);
   $('rf').onclick=()=>refresh({editor:true});$('csv').onclick=csv;
@@ -268,7 +276,7 @@ function shell(){
   $('thr').oninput=races;
   $('eq').oninput=e=>{const v=e.target.value.toLowerCase();document.querySelectorAll('#editor details').forEach(d=>{d.style.display=d.dataset.name.includes(v)?'':'none';});};
   $('addcat').onclick=addCat;$('syncpics').onclick=syncPics;
-  $('vq').oninput=voters;
+  $('vq').oninput=voters;$('xzip').onclick=()=>exportCards('zip');$('xppt').onclick=()=>exportCards('pptx');
   $('vreveal').onclick=()=>{revealAll=!revealAll;voters();};
   $('bk').onclick=backup;$('cadd').onclick=addCollab;
   $('dcsave').onclick=()=>alertsSave();$('dcreset').onclick=()=>alertsSave({p_reset:true});$('dcrm').onclick=()=>{if(confirm('Remove the saved webhook?'))alertsSave({p_webhook:''});};
@@ -300,14 +308,14 @@ async function refresh(o){
     sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters'),sb.from('collabs').select('*').order('sort')]);
   const err=a.error||b.error||k.error||n.error||vt.error||cl.error;
   if(err){toast('Error: '+err.message+' (did you run the latest supabase-setup.sql?)');return;}
-  CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,link:m.link_url,sort:m.sort,category_id:m.category_id}))}));
+  CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,link:m.link_url,desc:m.description,sort:m.sort,category_id:m.category_id}))}));
   NM={};CATS.forEach(c=>c.noms.forEach(m=>NM[m.id]=m));
   T={};unknown=0;
   (a.data||[]).forEach(r=>{if(NM[r.choice]&&NM[r.choice].category_id===r.category_id)(T[r.category_id]=T[r.category_id]||{})[r.choice]=r.votes;else unknown+=r.votes;});
   ov=b.data;cfg=c.data;VOT=vt.data||[];COLLABS=cl.data||[];
   if(!sel||!CATS.find(x=>x.id===sel))sel=CATS[0]?CATS[0].id:null;
   toast('Updated '+new Date().toLocaleTimeString());
-  seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();modTargets();cfgView();alertsLoad();
+  seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();exportTable();modTargets();cfgView();alertsLoad();
   if(o.editor){editor();collabsEditor();}
 }
 async function db(p,msg){
@@ -421,43 +429,42 @@ async function uploadImg(file,id){
   return sb.storage.from('nominee-images').getPublicUrl(path).data.publicUrl;
 }
 const nkey=s=>String(s||'').trim().toLowerCase();
+const FIELDS=[['img','image_url'],['link','link_url'],['desc','description']];
 function sharedFor(name,field,exceptId){
   const k=nkey(name);
   for(const c of CATS)for(const m of c.noms)if(m.id!==exceptId&&nkey(m.name)===k&&m[field])return m[field];
   return null;
 }
 const imageFor=(n,e)=>sharedFor(n,'img',e),linkFor=(n,e)=>sharedFor(n,'link',e);
-async function propagate(name,field,val,exceptId){      // same game name in other categories gets the same picture / link
-  const col=field==='img'?'image_url':'link_url',ids=[];
+async function propagate(name,field,val,exceptId){      // same game name in other categories gets the same picture / link / description
+  const col=FIELDS.find(f=>f[0]===field)[1],ids=[];
   CATS.forEach(c=>c.noms.forEach(m=>{if(m.id!==exceptId&&nkey(m.name)===nkey(name)&&m[field]!==val)ids.push(m.id);}));
   if(!ids.length)return 0;
   const r=await sb.from('nominees').update({[col]:val}).in('id',ids);
   if(r.error){toast('Error: '+r.error.message);return 0;}
   return ids.length;
 }
-async function saveNominee(n,nameVal,urlVal,linkVal,msg){
-  nameVal=nameVal.trim();urlVal=(urlVal||'').trim();linkVal=(linkVal||'').trim();
-  let img=urlVal||null,lk=linkVal||null,note='';
-  if(!img&&!n.img){const ex=imageFor(nameVal,n.id);if(ex){img=ex;note=' (picture copied from the same game)';}}
-  if(!lk&&!n.link){const ex=linkFor(nameVal,n.id);if(ex){lk=ex;note+=' (link copied from the same game)';}}
-  const r=await sb.from('nominees').update({name:nameVal,image_url:img,link_url:lk}).eq('id',n.id);
+async function saveNominee(n,v,msg){
+  v.name=v.name.trim();let note='';const val={};
+  FIELDS.forEach(([f,col])=>{let x=(v[f]||'').trim()||null;
+    if(!x&&!n[f]){const ex=sharedFor(v.name,f,n.id);if(ex){x=ex;note+=' ('+(f==='img'?'picture':f==='link'?'link':'description')+' copied from the same game)';}}
+    val[col]=x;});
+  const r=await sb.from('nominees').update(Object.assign({name:v.name},val)).eq('id',n.id);
   if(r.error){toast('Error: '+r.error.message+' (run the latest supabase-setup.sql?)');return;}
-  let c1=0,c2=0;
-  if(img&&img!==n.img)c1=await propagate(nameVal,'img',img,n.id);
-  if(lk&&lk!==n.link)c2=await propagate(nameVal,'link',lk,n.id);
-  const cnt=Math.max(c1,c2);
-  toast((msg||'Saved')+note+(cnt?' · same picture/link applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
+  let cnt=0;
+  for(const [f,col] of FIELDS){const x=val[col];if(x&&x!==n[f])cnt=Math.max(cnt,await propagate(v.name,f,x,n.id));}
+  toast((msg||'Saved')+note+(cnt?' · same details applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
   await refresh({editor:true});
 }
-async function syncPics(){                         // fill missing pictures and links for same-name nominees
+async function syncPics(){                         // fill missing pictures, links and descriptions for same-name nominees
   const G={};CATS.forEach(c=>c.noms.forEach(m=>{(G[nkey(m.name)]=G[nkey(m.name)]||[]).push(m);}));
   let n=0;
   for(const k in G){const g=G[k];
-    for(const [f,col] of [['img','image_url'],['link','link_url']]){
+    for(const [f,col] of FIELDS){
       const src=g.find(m=>m[f]);if(!src)continue;
       const ids=g.filter(m=>!m[f]).map(m=>m.id);
       if(ids.length){const r=await sb.from('nominees').update({[col]:src[f]}).in('id',ids);if(!r.error)n+=ids.length;}}}
-  toast(n?'Copied '+n+' missing pictures/links.':'Everything already matches.');
+  toast(n?'Copied '+n+' missing details.':'Everything already matches.');
   await refresh({editor:true});
 }
 function chk(label,val){const l=el('label','chk');const i=el('input');i.type='checkbox';i.checked=!!val;l.append(i,label);return {l,i};}
@@ -471,48 +478,51 @@ function editor(){
     const r=el('div','erow');
     const nm=el('input');nm.type='text';nm.value=c.name;
     const hid=chk('Hidden',c.hidden),clo=chk('Closed',c.closed);
-    const sv=el('button','sm gold','Save');sv.onclick=()=>db(sb.from('categories').update({name:nm.value.trim(),hidden:hid.i.checked,closed:clo.i.checked}).eq('id',c.id));
+    const gs=el('select');[['','Group: auto'],['main','Main Awards'],['genres','Genres'],['gameplay','Gameplay'],['fun','Fun & Community']].forEach(([v,l])=>{const o=el('option',0,l);o.value=v;gs.append(o);});gs.value=c.grp||'';
+    const sv=el('button','sm gold','Save');sv.onclick=()=>db(sb.from('categories').update({name:nm.value.trim(),hidden:hid.i.checked,closed:clo.i.checked,grp:gs.value||null}).eq('id',c.id));
     const up=el('button','sm','↑');up.onclick=()=>swap('categories',c,CATS[ci-1]);
     const dn=el('button','sm','↓');dn.onclick=()=>swap('categories',c,CATS[ci+1]);
     const del=el('button','sm red','Delete category');del.onclick=async()=>{
       if(!confirm('Delete "'+c.name+'", its nominees and all its votes?'))return;
       await sb.rpc('admin_delete_votes',{scope:'category',target:c.id});
       db(sb.from('categories').delete().eq('id',c.id),'Category deleted');};
-    r.append(nm,hid.l,clo.l,sv,up,dn,del);body.append(r);
+    r.append(nm,gs,hid.l,clo.l,sv,up,dn,del);body.append(r);
     c.noms.forEach((n,ni)=>{
       const row=el('div','nom');
       const th=el('img','thumb');if(n.img)th.src=n.img;
       const name=el('input','nm');name.type='text';name.value=n.name;name.placeholder='Nominee name';
       const url=el('input','u');url.type='text';url.value=n.img||'';url.placeholder='Image link (or use Upload)';
       const lk=el('input','u');lk.type='text';lk.value=n.link||'';lk.placeholder='Trailer / info link (YouTube etc.)';
+      const ds=el('input','u');ds.type='text';ds.value=n.desc||'';ds.placeholder='Short description (1–2 lines)';
       const file=el('input');file.type='file';file.accept='image/*';file.style.display='none';
       const upl=el('button','sm','Upload');upl.onclick=()=>file.click();
       file.onchange=async()=>{if(!file.files[0])return;toast('Uploading…');
         try{url.value=await uploadImg(file.files[0],n.id);th.src=url.value;
-          saveNominee(n,name.value,url.value,lk.value,'Picture saved');}
+          saveNominee(n,{name:name.value,img:url.value,link:lk.value,desc:ds.value},'Picture saved');}
         catch(e){toast('Upload failed: '+(e.message||e));}};
-      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null,link_url:lk.value.trim()||null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,name.value,url.value,lk.value,'Saved');};
+      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null,link_url:lk.value.trim()||null,description:ds.value.trim()||null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,{name:name.value,img:url.value,link:lk.value,desc:ds.value},'Saved');};
       const u2=el('button','sm','↑');u2.onclick=()=>swap('nominees',n,c.noms[ni-1]);
       const d2=el('button','sm','↓');d2.onclick=()=>swap('nominees',n,c.noms[ni+1]);
       const x=el('button','sm red','Delete');x.onclick=async()=>{
         if(!confirm('Delete nominee "'+n.name+'" and its votes?'))return;
         await sb.rpc('admin_delete_votes',{scope:'nominee',target:n.id});
         db(sb.from('nominees').delete().eq('id',n.id),'Nominee deleted');};
-      row.append(th,name,url,lk,file,upl,s2,u2,d2,x);body.append(row);
+      row.append(th,name,url,lk,ds,file,upl,s2,u2,d2,x);body.append(row);
     });
     const add=el('div','nom');
     const an=el('input','nm');an.type='text';an.placeholder='+ New nominee name';
     const au=el('input','u');au.type='text';au.placeholder='Image link (optional; you can upload after adding)';
     const alk=el('input','u');alk.type='text';alk.placeholder='Trailer / info link (optional)';
+    const ad=el('input','u');ad.type='text';ad.placeholder='Short description (optional)';
     const ab=el('button','sm gold','Add nominee');
     ab.onclick=async()=>{const v=an.value.trim();if(!v)return;openSet.add(c.id);
-      const given=au.value.trim()||null,img=given||imageFor(v)||null,givenL=alk.value.trim()||null,lnk=givenL||linkFor(v)||null;
-      const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,link_url:lnk,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
+      const given=au.value.trim()||null,img=given||imageFor(v)||null,givenL=alk.value.trim()||null,lnk=givenL||linkFor(v)||null,givenD=ad.value.trim()||null,dsc=givenD||sharedFor(v,'desc')||null;
+      const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,link_url:lnk,description:dsc,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
       if(r.error){toast('Error: '+r.error.message);return;}
-      const cnt=Math.max(given?await propagate(v,'img',given,null):0,givenL?await propagate(v,'link',givenL,null):0);
+      const cnt=Math.max(given?await propagate(v,'img',given,null):0,givenL?await propagate(v,'link',givenL,null):0,givenD?await propagate(v,'desc',givenD,null):0);
       toast('Nominee added'+(!given&&img?' (picture copied from the same game)':'')+(cnt?' · picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
       await refresh({editor:true});};
-    add.append(an,au,alk,ab);body.append(add);
+    add.append(an,au,alk,ad,ab);body.append(add);
     d.append(body);root.append(d);
   });
 }
@@ -569,6 +579,72 @@ async function addCollab(){
   const name=$('cn').value.trim(),url=$('cu').value.trim();
   if(!name||!url){toast('Enter a channel name and its YouTube link.');return;}
   if(await db(sb.from('collabs').insert({name,url,icon_url:$('ci').value.trim()||null,sort:Math.max(0,...COLLABS.map(c=>c.sort))+1}),'Channel added')){$('cn').value=$('cu').value=$('ci').value='';}
+}
+
+// ---------- winners export ----------
+const JSZIP='https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',PPTX='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+function loadScript(u){return new Promise((res,rej)=>{if(document.querySelector('script[src="'+u+'"]'))return res();const s=document.createElement('script');s.src=u;s.onload=res;s.onerror=()=>rej(new Error('Could not load '+u));document.head.append(s);});}
+const loadImg=u=>new Promise(r=>{if(!u)return r(null);const i=new Image();i.crossOrigin='anonymous';i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
+function rrect(x,a,b,w,h,r){x.beginPath();x.moveTo(a+r,b);x.arcTo(a+w,b,a+w,b+h,r);x.arcTo(a+w,b+h,a,b+h,r);x.arcTo(a,b+h,a,b,r);x.arcTo(a,b,a+w,b,r);x.closePath();}
+function wrapLines(x,text,maxW){const out=[];let cur='';String(text).split(' ').forEach(w=>{const t=cur?cur+' '+w:w;if(x.measureText(t).width>maxW&&cur){out.push(cur);cur=w;}else cur=t;});if(cur)out.push(cur);return out;}
+async function drawCard(c){
+  const s=standing(c),w=s.leaders[0]||s.rows[0].n,cv=document.createElement('canvas');cv.width=1920;cv.height=1080;
+  const x=cv.getContext('2d'),img=await loadImg(w.img);
+  let g=x.createLinearGradient(0,0,1920,1080);g.addColorStop(0,'#1d0a3d');g.addColorStop(1,'#050507');x.fillStyle=g;x.fillRect(0,0,1920,1080);
+  g=x.createRadialGradient(1400,380,40,1400,380,760);g.addColorStop(0,'rgba(168,85,247,.5)');g.addColorStop(1,'rgba(168,85,247,0)');x.fillStyle=g;x.fillRect(0,0,1920,1080);
+  x.textBaseline='alphabetic';x.textAlign='left';
+  x.fillStyle='#c4b5fd';x.font='700 34px system-ui,sans-serif';x.fillText('PHANTOM AWARDS 2026',110,100);
+  x.textAlign='right';x.fillText('DePhantom தமிழ்',1810,100);x.textAlign='left';
+  x.fillStyle='#d8b4fe';x.font='800 60px system-ui,sans-serif';
+  let y=230;wrapLines(x,c.name.toUpperCase(),800).forEach(l=>{x.fillText(l,110,y);y+=72;});
+  x.fillStyle='#f5c542';x.font='800 36px system-ui,sans-serif';x.fillText(s.tie?'🤝 TIE':'🏆 WINNER',110,y+20);y+=110;
+  x.fillStyle='#ffffff';x.font='800 92px system-ui,sans-serif';
+  const names=s.tie?s.leaders.map(n=>n.name).join(' / '):w.name;
+  wrapLines(x,names,820).slice(0,3).forEach(l=>{x.fillText(l,110,y);y+=104;});
+  x.fillStyle='#f5c542';x.font='700 48px system-ui,sans-serif';
+  x.fillText(Math.round(s.top*100/s.total)+'%  ·  '+s.top+' votes',110,y+10);
+  const ru=s.rows.filter(r=>!s.leaders.includes(r.n)&&r.v>0).slice(0,2);
+  x.fillStyle='#cbbcf0';x.font='600 32px system-ui,sans-serif';
+  ru.forEach((r,k)=>x.fillText((k?'🥉 ':'🥈 ')+r.n.name+'  '+Math.round(r.v*100/s.total)+'%',110,930+k*50));
+  // picture
+  const bx=1000,by=190,bw=810,bh=456;
+  x.save();rrect(x,bx,by,bw,bh,28);x.clip();
+  if(img){const k=Math.max(bw/img.width,bh/img.height),dw=img.width*k,dh=img.height*k;x.drawImage(img,bx+(bw-dw)/2,by+(bh-dh)/2,dw,dh);}
+  else{g=x.createLinearGradient(bx,by,bx+bw,by+bh);g.addColorStop(0,'#3b1578');g.addColorStop(1,'#12092a');x.fillStyle=g;x.fillRect(bx,by,bw,bh);
+    x.fillStyle='#d8b4fe';x.font='800 150px system-ui,sans-serif';x.textAlign='center';x.fillText(String(w.name).split(' ').slice(0,2).map(t=>t[0]).join('').toUpperCase(),bx+bw/2,by+bh/2+50);x.textAlign='left';}
+  x.restore();x.lineWidth=8;x.strokeStyle='#f5c542';rrect(x,bx,by,bw,bh,28);x.stroke();
+  x.fillStyle='#8d82b5';x.font='500 26px system-ui,sans-serif';x.textAlign='center';x.fillText('Fan-made awards by the DePhantom தமிழ் community',960,1030);
+  return cv;
+}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();}
+const toBlob=cv=>new Promise(r=>cv.toBlob(r,'image/png'));
+function exportList(){return CATS.filter(c=>!c.hidden&&standing(c).total>0);}
+function exportTable(){
+  const tb=$('xtb');if(!tb)return;tb.innerHTML='';
+  exportList().forEach(c=>{const s=standing(c),tr=el('tr');
+    [c.name,s.tie?s.leaders.map(n=>n.name).join(' / ')+' (tie)':s.leaders[0].name,s.top+' / '+s.total].forEach(v=>tr.append(el('td',0,String(v))));
+    const td=el('td'),b=el('button','sm','Download PNG');
+    b.onclick=async()=>{b.disabled=true;try{dl(await toBlob(await drawCard(c)),c.id+'.png');}catch(e){toast('Could not make the card: '+e.message);}b.disabled=false;};
+    td.append(b);tr.append(td);tb.append(tr);});
+  if(!tb.children.length){const tr=el('tr');tr.append(el('td',0,'No votes yet.'));tb.append(tr);}
+}
+async function exportCards(kind){
+  const list=exportList().reverse();   // reveal order: Game of the Year last
+  if(!list.length){$('xmsg').textContent='No votes yet.';return;}
+  $('xmsg').textContent='Rendering '+list.length+' cards…';
+  try{
+    const out=[];for(const c of list)out.push({c,cv:await drawCard(c)});
+    if(kind==='zip'){
+      await loadScript(JSZIP);const z=new JSZip();
+      for(let i=0;i<out.length;i++)z.file(String(i+1).padStart(2,'0')+'-'+out[i].c.id+'.png',await toBlob(out[i].cv));
+      dl(await z.generateAsync({type:'blob'}),'phantom-awards-winners.zip');
+    }else{
+      await loadScript(PPTX);const px=new PptxGenJS();px.layout='LAYOUT_16x9';
+      out.forEach(o=>px.addSlide().addImage({data:o.cv.toDataURL('image/png'),x:0,y:0,w:'100%',h:'100%'}));
+      await px.writeFile({fileName:'phantom-awards-winners.pptx'});
+    }
+    $('xmsg').textContent='Done. '+list.length+' cards exported.';
+  }catch(e){$('xmsg').textContent='Export failed: '+(e.message||e);}
 }
 
 // ---------- backup ----------
