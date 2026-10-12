@@ -114,8 +114,11 @@ const SUPABASE_ANON_KEY="sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J";
 
 const app=document.getElementById('app'),$=id=>document.getElementById(id);
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;}
+const SB_KEY=(typeof SUPABASE_PUBLISHABLE_KEY!=='undefined'?SUPABASE_PUBLISHABLE_KEY:(typeof SUPABASE_ANON_KEY!=='undefined'?SUPABASE_ANON_KEY:''));  // also accepts the old name SUPABASE_ANON_KEY
 function keyGuard(k){
   k=String(k||'').trim();
+  if(!k)throw new Error('The key line at the top of this file is missing or misspelled. It must look exactly like: const SUPABASE_PUBLISHABLE_KEY="sb_publishable_...";');
+  if(/^YOUR_/.test(k))throw new Error('Paste your Supabase Publishable key into the key line at the top of this file.');
   if(/^sb_secret_/.test(k))throw new Error('STOP: that is a SECRET key. Never put it in a website file. Use the Publishable key (sb_publishable_...).');
   const p=k.split('.');
   if(p.length===3){let role=null;try{role=JSON.parse(atob(p[1].replace(/-/g,'+').replace(/_/g,'/'))).role;}catch(e){}
@@ -125,9 +128,9 @@ function keyGuard(k){
 function cleanUrl(u){try{return new URL(u.trim()).origin;}catch(e){return u.trim();}}
 let sb=null,CFGERR='';
 try{
-  if(SUPABASE_URL.startsWith('YOUR_')||SUPABASE_PUBLISHABLE_KEY.startsWith('YOUR_'))throw new Error('Paste your Supabase URL and anon key into the two lines at the top of admin.html (const SUPABASE_URL and const SUPABASE_PUBLISHABLE_KEY), then upload the file again.');
+  if(SUPABASE_URL.startsWith('YOUR_')||SB_KEY.startsWith('YOUR_'))throw new Error('Paste your Supabase Project URL and Publishable key into the two lines at the top of admin.html (const SUPABASE_URL and const SUPABASE_PUBLISHABLE_KEY), then upload the file again.');
   if(typeof supabase==='undefined')throw new Error('The Supabase library did not load. Check your internet connection or turn off ad-blockers for this page.');
-  sb=supabase.createClient(cleanUrl(SUPABASE_URL),keyGuard(SUPABASE_PUBLISHABLE_KEY),{auth:{storageKey:'phantom-admin-auth'}});
+  sb=supabase.createClient(cleanUrl(SUPABASE_URL),keyGuard(SB_KEY),{auth:{storageKey:'phantom-admin-auth'}});
 }catch(e){CFGERR=e.message;}
 if(typeof Chart!=='undefined'){Chart.defaults.color='#cbbcf0';Chart.defaults.borderColor='#2a1b45';}
 function fail(m){app.innerHTML='';const c=el('div','card');c.style.cssText='max-width:560px;margin:10vh auto';c.append(el('h2',0,'Admin cannot start'),el('p',0,m));app.append(c);}

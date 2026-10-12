@@ -331,8 +331,11 @@ const t=k=>(TXT[lang]||TXT.en)[k];
 document.documentElement.dataset.theme=(()=>{try{return localStorage.getItem('theme')||'dark';}catch(e){return 'dark';}})();
 const app=document.getElementById('app');
 const DEMO=location.search.includes('demo');
+const SB_KEY=(typeof SUPABASE_PUBLISHABLE_KEY!=='undefined'?SUPABASE_PUBLISHABLE_KEY:(typeof SUPABASE_ANON_KEY!=='undefined'?SUPABASE_ANON_KEY:''));  // also accepts the old name SUPABASE_ANON_KEY
 function keyGuard(k){
   k=String(k||'').trim();
+  if(!k)throw new Error('The key line at the top of this file is missing or misspelled. It must look exactly like: const SUPABASE_PUBLISHABLE_KEY="sb_publishable_...";');
+  if(/^YOUR_/.test(k))throw new Error('Paste your Supabase Publishable key into the key line at the top of this file.');
   if(/^sb_secret_/.test(k))throw new Error('STOP: that is a SECRET key. Never put it in a website file. Use the Publishable key (sb_publishable_...).');
   const p=k.split('.');
   if(p.length===3){let role=null;try{role=JSON.parse(atob(p[1].replace(/-/g,'+').replace(/_/g,'/'))).role;}catch(e){}
@@ -934,7 +937,7 @@ startBg();
   if(DEMO){msgText='DEMO: fake results for previewing the reveal.';route();return;}
   if(!ready){msgText=t('noSave')+' (add your Supabase URL and anon key)';route();return;}
   try{
-    sb=supabase.createClient(cleanUrl(SUPABASE_URL),keyGuard(SUPABASE_PUBLISHABLE_KEY),{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true}});
+    sb=supabase.createClient(cleanUrl(SUPABASE_URL),keyGuard(SB_KEY),{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true}});
     const {data:{session}}=await sb.auth.getSession();
     if(!session||session.user.is_anonymous){needLogin=true;route();return;}
     user=session.user;online=true;await loadData();await checkConsent();route();
