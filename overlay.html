@@ -25,7 +25,7 @@ h2{margin:1vh 0;font-size:clamp(22px,4.4vw,52px);letter-spacing:.12em;text-trans
 </head>
 <body>
 <div id="o"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"></script>
 <script>
 /* OBS OVERLAY
    Add as a Browser Source in OBS (size 1920x1080). The background is transparent.
@@ -36,13 +36,21 @@ h2{margin:1vh 0;font-size:clamp(22px,4.4vw,52px);letter-spacing:.12em;text-trans
      ?bg=1        solid dark background (for testing in a normal browser)
      ?demo        fake results for a preview
 */
-const SUPABASE_URL="https://bgklmhlffnhstxogvnln.supabase.co/rest/v1/";
-const SUPABASE_ANON_KEY="sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J";
+const SUPABASE_URL="YOUR_SUPABASE_URL";
+const SUPABASE_PUBLISHABLE_KEY="YOUR_SUPABASE_PUBLISHABLE_KEY";
 
 const Q=new URLSearchParams(location.search),DEMO=Q.has('demo'),AUTO=+Q.get('auto')||0,ONLY=Q.get('cat');
 if(Q.has('bg'))document.body.classList.add('bg');
 const root=document.getElementById('o');
 function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e;}
+function keyGuard(k){
+  k=String(k||'').trim();
+  if(/^sb_secret_/.test(k))throw new Error('STOP: that is a SECRET key. Never put it in a website file. Use the Publishable key (sb_publishable_...).');
+  const p=k.split('.');
+  if(p.length===3){let role=null;try{role=JSON.parse(atob(p[1].replace(/-/g,'+').replace(/_/g,'/'))).role;}catch(e){}
+    if(role==='service_role')throw new Error('STOP: that is the service_role key. Never put it in a website file. Use the Publishable key (sb_publishable_...).');}
+  return k;
+}
 function cleanUrl(u){try{return new URL(u.trim()).origin;}catch(e){return u.trim();}}
 function say(m){root.innerHTML='';const p=el('div','panel');p.append(el('div','msg',m));root.append(p);}
 
@@ -55,7 +63,7 @@ async function load(){
     counts={};cats.forEach(c=>{counts[c.id]={};c.noms.forEach(n=>counts[c.id][n.id]=Math.floor(Math.random()*400)+20);});
   }else{
     if(SUPABASE_URL.startsWith('YOUR_')||typeof supabase==='undefined'){say('Paste your Supabase URL and key at the top of overlay.html');return false;}
-    const sb=supabase.createClient(cleanUrl(SUPABASE_URL),SUPABASE_ANON_KEY.trim());
+    const sb=supabase.createClient(cleanUrl(SUPABASE_URL),keyGuard(SUPABASE_PUBLISHABLE_KEY));
     const [c,n,t]=await Promise.all([sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('get_totals')]);
     if(c.error||n.error){say('Could not load: '+(c.error||n.error).message);return false;}
     cats=c.data.map(x=>({id:x.id,name:x.name,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url}))}));

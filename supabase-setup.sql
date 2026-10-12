@@ -421,5 +421,211 @@ end $$;
 revoke execute on function public.admin_delete_votes(text, text) from public, anon;
 grant execute on function public.admin_delete_votes(text, text) to authenticated;
 
+-- =====================================================================
+-- 11) PDPA: EXPLICIT CONSENT, DATA-SUBJECT RIGHTS, RETENTION, GOOGLE-ONLY VOTING
+-- =====================================================================
+alter table public.config add column if not exists consent_version text not null default '2026-10';  -- change it to force everyone to re-accept
+alter table public.config add column if not exists retention_days  int  not null default 90;       -- voter data is deleted this many days after reveal_at
+
+-- Record of who accepted the Terms + Privacy Policy, and when
+create table if not exists public.consents (
+  voter_id    uuid primary key references auth.users(id) on delete cascade,
+  version     text not null,
+  accepted_at timestamptz not null default now()
+);
+alter table public.consents enable row level security;
+drop policy if exists "read own consent" on public.consents;
+create policy "read own consent" on public.consents for select using (auth.uid() = voter_id);   -- nobody can write directly
+
+create or replace function public.record_consent() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then
+    raise exception 'sign in first';
+  end if;
+  insert into public.consents (voter_id, version)
+  values (auth.uid(), (select consent_version from public.config where id = 1))
+  on conflict (voter_id) do update set version = excluded.version, accepted_at = now();
+end $$;
+revoke execute on function public.record_consent() from public, anon;
+grant execute on function public.record_consent() to authenticated;
+
+-- Only a signed-in GOOGLE account that has accepted the CURRENT policy may vote or predict.
+create or replace function public.can_participate() returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null
+     and coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false
+     and coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+     and exists (select 1 from public.consents c
+                 where c.voter_id = auth.uid()
+                   and c.version = (select consent_version from public.config where id = 1))
+$$;
+grant execute on function public.can_participate() to authenticated;
+
+-- Final voting / prediction rules (insert-only for the public; reading is limited to your own rows)
+drop policy if exists "insert own votes" on public.votes;
+drop policy if exists "update own votes" on public.votes;
+create policy "insert own votes" on public.votes for insert with check (
+  auth.uid() = voter_id
+  and public.can_participate()
+  and now() < (select voting_ends from public.config)
+  and not (select paused from public.config)
+  and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
+create policy "update own votes" on public.votes for update
+  using (auth.uid() = voter_id)
+  with check (
+  auth.uid() = voter_id
+  and public.can_participate()
+  and now() < (select voting_ends from public.config)
+  and not (select paused from public.config)
+  and exists (select 1 from public.categories c where c.id = votes.category_id and not c.closed and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = votes.category_id and n.id::text = votes.choice));
+
+drop policy if exists "insert own predictions" on public.predictions;
+drop policy if exists "update own predictions" on public.predictions;
+create policy "insert own predictions" on public.predictions for insert with check (
+  auth.uid() = voter_id
+  and public.can_participate()
+  and now() < (select voting_ends from public.config)
+  and exists (select 1 from public.categories c where c.id = predictions.category_id and not c.hidden)
+  and exists (select 1 from public.nominees n where n.category_id = predictions.category_id and n.id::text = predictions.nominee_id));
+create policy "update own predictions" on public.predictions for update
+  using (auth.uid() = voter_id)
+  with check (
+  auth.uid() = voter_id
+  and public.can_participate()
+  and now() < (select voting_ends from public.config)
+  and exists (select 1 from public.nominees n where n.category_id = predictions.category_id and n.id::text = predictions.nominee_id));
+
+-- Totals that survive the retention purge (anonymous counts only)
+create table if not exists public.results_archive (
+  category_id text not null,
+  choice      text not null,
+  votes       int  not null,
+  primary key (category_id, choice)
+);
+alter table public.results_archive enable row level security;   -- no policies: never readable from the website
+
+create or replace function public.get_totals()
+returns table (category_id text, choice text, votes int)
+language sql security definer set search_path = public as $$
+  select x.category_id, x.choice, sum(x.n)::int
+  from (select v.category_id, v.choice, count(*) n from public.votes v group by 1, 2
+        union all
+        select a.category_id, a.choice, a.votes from public.results_archive a) x
+  join public.categories c on c.id = x.category_id
+  where not c.hidden and now() >= (select reveal_at from public.config where id = 1)
+  group by x.category_id, x.choice
+$$;
+
+create or replace function public.admin_totals()
+returns table (category_id text, choice text, votes int)
+language sql security definer set search_path = public as $$
+  select x.category_id, x.choice, sum(x.n)::int
+  from (select v.category_id, v.choice, count(*) n from public.votes v group by 1, 2
+        union all
+        select a.category_id, a.choice, a.votes from public.results_archive a) x
+  where public.is_admin()
+  group by x.category_id, x.choice
+$$;
+
+-- RIGHT OF ACCESS / PORTABILITY: a signed-in user downloads everything held about them
+create or replace function public.export_my_data() returns json
+language sql security definer set search_path = public, auth as $$
+  select json_build_object(
+    'email', u.email,
+    'name', coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name'),
+    'account_created', u.created_at,
+    'consent', (select json_build_object('version', c.version, 'accepted_at', c.accepted_at)
+                from public.consents c where c.voter_id = u.id),
+    'votes', coalesce((select json_agg(json_build_object('category', cat.name, 'nominee', n.name, 'last_updated', v.updated_at) order by v.updated_at)
+                from public.votes v
+                left join public.categories cat on cat.id = v.category_id
+                left join public.nominees n on n.id::text = v.choice
+                where v.voter_id = u.id), '[]'::json),
+    'predictions', coalesce((select json_agg(json_build_object('category', cat.name, 'nominee', n.name, 'last_updated', p.updated_at) order by p.updated_at)
+                from public.predictions p
+                left join public.categories cat on cat.id = p.category_id
+                left join public.nominees n on n.id::text = p.nominee_id
+                where p.voter_id = u.id), '[]'::json))
+  from auth.users u where u.id = auth.uid()
+$$;
+revoke execute on function public.export_my_data() from public, anon;
+grant execute on function public.export_my_data() to authenticated;
+
+-- RIGHT OF ERASURE / WITHDRAWAL: a user deletes their own account, votes, predictions and consent record
+create or replace function public.delete_my_account() returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if public.is_admin() then raise exception 'Admin accounts cannot be erased here'; end if;
+  delete from auth.users where id = auth.uid();      -- cascades to votes, predictions, consents
+end $$;
+revoke execute on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;
+
+-- Admin: erase one person's account when they email you a deletion request
+create or replace function public.admin_erase_voter(target uuid) returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if exists (select 1 from auth.users u join public.admins a on lower(a.email) = lower(u.email) where u.id = target) then
+    raise exception 'cannot erase an admin account';
+  end if;
+  delete from auth.users where id = target;
+end $$;
+revoke execute on function public.admin_erase_voter(uuid) from public, anon;
+grant execute on function public.admin_erase_voter(uuid) to authenticated;
+
+-- RETENTION: keep anonymous totals, delete every voter account + votes + predictions + consents (admins are kept)
+create or replace function public._purge_voters() returns int
+language plpgsql security definer set search_path = public, auth as $$
+declare n int;
+begin
+  insert into public.results_archive (category_id, choice, votes)
+    select category_id, choice, count(*)::int from public.votes group by 1, 2
+  on conflict (category_id, choice) do update set votes = public.results_archive.votes + excluded.votes;
+  delete from auth.users u
+   where u.id in (select voter_id from public.votes union select voter_id from public.predictions union select voter_id from public.consents)
+     and lower(coalesce(u.email, '')) not in (select lower(email) from public.admins);
+  get diagnostics n = row_count;
+  delete from public.votes where true;
+  delete from public.predictions where true;
+  delete from public.consents where true;
+  return n;
+end $$;
+revoke execute on function public._purge_voters() from public, anon, authenticated;
+
+create or replace function public.admin_purge_voter_data() returns int
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  return public._purge_voters();
+end $$;
+revoke execute on function public.admin_purge_voter_data() from public, anon;
+grant execute on function public.admin_purge_voter_data() to authenticated;
+
+create or replace function public.purge_expired_voter_data() returns void
+language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select reveal_at, retention_days into c from public.config where id = 1;
+  if now() > c.reveal_at + make_interval(days => c.retention_days)
+     and (exists (select 1 from public.votes) or exists (select 1 from public.consents)) then
+    perform public._purge_voters();
+  end if;
+end $$;
+revoke execute on function public.purge_expired_voter_data() from public, anon, authenticated;
+
+-- Daily automatic purge (needs the pg_cron extension; if it is unavailable you can still use the admin Purge button)
+do $$
+begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('phantom-purge-voter-data', '15 3 * * *', 'select public.purge_expired_voter_data()');
+exception when others then
+  raise notice 'pg_cron is not enabled, automatic purge not scheduled: %', sqlerrm;
+end $$;
+
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';
