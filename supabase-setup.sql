@@ -455,12 +455,30 @@ create or replace function public.can_participate() returns boolean
 language sql stable security definer set search_path = public as $$
   select auth.uid() is not null
      and coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false
-     and coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+     and (coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+          or jsonb_exists(coalesce(auth.jwt() -> 'app_metadata' -> 'providers', '[]'::jsonb), 'google'))   -- also accepts accounts that were linked to Google later
      and exists (select 1 from public.consents c
                  where c.voter_id = auth.uid()
                    and c.version = (select consent_version from public.config where id = 1))
 $$;
 grant execute on function public.can_participate() to authenticated;
+
+-- Tells the website exactly why a vote was refused (used to show a clear message)
+create or replace function public.participation_status() returns json
+language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'signed_in', auth.uid() is not null,
+    'anonymous', coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false),
+    'google',   coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+                or jsonb_exists(coalesce(auth.jwt() -> 'app_metadata' -> 'providers', '[]'::jsonb), 'google'),
+    'consent',  exists (select 1 from public.consents c where c.voter_id = auth.uid()
+                        and c.version = (select consent_version from public.config where id = 1)),
+    'paused',   (select paused from public.config where id = 1),
+    'ends',     (select voting_ends from public.config where id = 1))
+$$;
+grant execute on function public.participation_status() to authenticated;
+
+alter table public.config add column if not exists predictions_enabled boolean not null default true;  -- admin switch for the predictions game
 
 -- Final voting / prediction rules (insert-only for the public; reading is limited to your own rows)
 drop policy if exists "insert own votes" on public.votes;

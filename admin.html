@@ -265,7 +265,8 @@ function shell(){
 
   <section class="tab" id="t-set">
    <div class="card"><h2>Voting switches</h2><p id="phase"></p>
-    <label class="chk" style="font-size:16px;color:var(--text)"><input type="checkbox" id="pz"> Pause voting for everyone (fans see "Voting is paused")</label></div>
+    <label class="chk" style="font-size:16px;color:var(--text)"><input type="checkbox" id="pz"> Pause voting for everyone (fans see "Voting is paused")</label>
+    <br><label class="chk" style="font-size:16px;color:var(--text);margin-top:10px"><input type="checkbox" id="pe"> Predictions game on (🔮 buttons, leaderboard, Fortune Teller badge)</label></div>
    <div class="card"><h2>Discord milestone alerts</h2>
     <p class="note">Get a message in your Discord channel when the number of voters hits a milestone. In Discord: Server Settings → Integrations → Webhooks → New Webhook → pick a channel → Copy Webhook URL. The URL is stored privately and can never be read back by the website.</p>
     <div class="row"><input id="dcw" type="password" placeholder="https://discord.com/api/webhooks/..." style="flex:1;min-width:240px"></div><br>
@@ -306,6 +307,7 @@ function shell(){
   $('ppb').onclick=async()=>{if($('ppc').value.trim()!=='PURGE'){$('ppr').textContent='Type PURGE in the box first.';return;}
     const r=await sb.rpc('admin_purge_voter_data');$('ppr').textContent=r.error?'Error: '+r.error.message:'Done. '+r.data+' voter accounts deleted; totals kept.';if(!r.error){$('ppc').value='';refresh({editor:false});}};
   $('pz').onchange=e=>saveCfg({paused:e.target.checked});
+  $('pe').onchange=e=>saveCfg({predictions_enabled:e.target.checked});
   $('sv').onclick=()=>saveCfg({voting_ends:iso($('ends').value),reveal_at:iso($('rev').value)});
   $('now').onclick=()=>saveCfg({reveal_at:new Date().toISOString()});
   $('cl').onclick=()=>saveCfg({voting_ends:new Date().toISOString()});
@@ -710,7 +712,7 @@ const iso=v=>v?new Date(v).toISOString():undefined;
 const loc=i=>{const d=new Date(i);return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);};
 function cfgView(){
   if(!cfg)return;
-  $('ends').value=loc(cfg.voting_ends);$('rev').value=loc(cfg.reveal_at);$('pz').checked=!!cfg.paused;$('ann').value=cfg.announcement||'';
+  $('ends').value=loc(cfg.voting_ends);$('rev').value=loc(cfg.reveal_at);$('pz').checked=!!cfg.paused;$('pe').checked=cfg.predictions_enabled!==false;$('ann').value=cfg.announcement||'';
   const n=Date.now(),p=n<new Date(cfg.voting_ends)?(cfg.paused?'Voting is PAUSED':'Voting is OPEN'):n<new Date(cfg.reveal_at)?'Voting CLOSED, results hidden':'Results are LIVE';
   $('phase').textContent='';$('phase').append(el('span','pill',p));
 }
