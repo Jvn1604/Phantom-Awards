@@ -1,7 +1,7 @@
 -- PHANTOM AWARDS 2026: run this whole file in Supabase > SQL Editor.
 -- BEFORE RUNNING: replace YOUR_ADMIN_EMAIL (near the bottom) with the email of your Supabase admin user.
 -- Safe to run more than once.
--- Also enable: Authentication > Providers > "Allow anonymous sign-ins".
+-- Also: Authentication > Providers > Google ON, "Allow anonymous sign-ins" OFF, and Authentication > Multi-Factor > TOTP ON.
 
 -- 1) Votes: one row per person per category
 create table if not exists public.votes (
@@ -644,6 +644,88 @@ begin
 exception when others then
   raise notice 'pg_cron is not enabled, automatic purge not scheduled: %', sqlerrm;
 end $$;
+
+-- =====================================================================
+-- 12) SECURITY HARDENING (October 2026)
+--  * Admin check uses your confirmed account id, not the email text inside the sign-in token.
+--  * Admin dashboard requires 2-step verification (authenticator app, session level aal2).
+--    admin.html walks you through the one-time set-up the first time you sign in.
+--  * Picture uploads: images only, 2 MB max.
+--  * Internal functions can no longer be called from the website.
+-- =====================================================================
+
+-- Is the signed-in user an admin account? (no 2-step check; used to block deleting the admin account
+-- and to decide whether admin.html should ask for the 2-step code)
+create or replace function public.is_admin_account() returns boolean
+language sql security definer stable set search_path = public, auth as $
+  select exists (
+    select 1 from auth.users u join public.admins a on lower(a.email) = lower(u.email)
+    where u.id = auth.uid() and u.email_confirmed_at is not null)
+$;
+
+-- Full admin rights: admin account AND a 2-step verified session.
+-- Every admin policy and admin_* function calls this, so all of them now need 2-step verification.
+create or replace function public.is_admin() returns boolean
+language sql security definer stable set search_path = public, auth as $
+  select public.is_admin_account() and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
+$;
+revoke execute on function public.is_admin_account() from public, anon;
+grant execute on function public.is_admin(), public.is_admin_account() to authenticated;
+grant execute on function public.is_admin() to anon;   -- used inside public read policies; returns false for visitors
+
+-- The admin account must never be deletable from the public site (it uses a normal, non-2-step session there).
+create or replace function public.delete_my_account() returns void
+language plpgsql security definer set search_path = public, auth as $
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if public.is_admin_account() then raise exception 'Admin accounts cannot be erased here'; end if;
+  delete from auth.users where id = auth.uid();      -- cascades to votes, predictions, consents
+end $;
+revoke execute on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;
+
+-- "Invalid votes" moderation also clears predictions that point at nominees that no longer exist
+create or replace function public.admin_delete_votes(scope text, target text default null)
+returns int language plpgsql security definer set search_path = public as $
+declare n int;
+begin
+  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if scope = 'all' then delete from public.votes where true; delete from public.predictions where true;
+  elsif scope = 'category' then delete from public.votes where category_id = target; delete from public.predictions where category_id = target;
+  elsif scope = 'nominee' then delete from public.votes where choice = target; delete from public.predictions where nominee_id = target;
+  elsif scope = 'voter' then delete from public.votes where voter_id = target::uuid; delete from public.predictions where voter_id = target::uuid;
+  elsif scope = 'invalid' then
+    delete from public.votes v where not exists
+      (select 1 from public.nominees x where x.category_id = v.category_id and x.id::text = v.choice);
+    get diagnostics n = row_count;
+    delete from public.predictions p where not exists
+      (select 1 from public.nominees x where x.category_id = p.category_id and x.id::text = p.nominee_id);
+    return n;
+  else raise exception 'bad scope'; end if;
+  get diagnostics n = row_count;
+  return n;
+end $;
+revoke execute on function public.admin_delete_votes(text, text) from public, anon;
+grant execute on function public.admin_delete_votes(text, text) to authenticated;
+
+-- Admin functions: signed-in users only (each one also checks is_admin() inside)
+revoke execute on function public.admin_totals(), public.admin_overview(), public.admin_voters(),
+  public.admin_get_alerts(), public.admin_set_alerts(text, boolean, int[], boolean), public.admin_test_discord(),
+  public.admin_erase_voter(uuid), public.admin_purge_voter_data() from public, anon;
+
+-- Internal functions: never callable from the website
+revoke execute on function public.notify_milestone(), public._purge_voters(), public.purge_expired_voter_data()
+  from public, anon, authenticated;
+
+-- Only signed-in users need these
+revoke execute on function public.can_participate(), public.participation_status(), public.get_leaderboard(),
+  public.record_consent(), public.export_my_data() from public, anon;
+
+-- Picture uploads: images only, at most 2 MB each (the admin page already shrinks pictures to about 100 KB)
+update storage.buckets
+   set file_size_limit = 2097152,
+       allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+ where id = 'nominee-images';
 
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';
