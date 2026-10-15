@@ -657,36 +657,36 @@ end $$;
 -- Is the signed-in user an admin account? (no 2-step check; used to block deleting the admin account
 -- and to decide whether admin.html should ask for the 2-step code)
 create or replace function public.is_admin_account() returns boolean
-language sql security definer stable set search_path = public, auth as $
+language sql security definer stable set search_path = public, auth as $$
   select exists (
     select 1 from auth.users u join public.admins a on lower(a.email) = lower(u.email)
     where u.id = auth.uid() and u.email_confirmed_at is not null)
-$;
+$$;
 
 -- Full admin rights: admin account AND a 2-step verified session.
 -- Every admin policy and admin_* function calls this, so all of them now need 2-step verification.
 create or replace function public.is_admin() returns boolean
-language sql security definer stable set search_path = public, auth as $
+language sql security definer stable set search_path = public, auth as $$
   select public.is_admin_account() and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
-$;
+$$;
 revoke execute on function public.is_admin_account() from public, anon;
 grant execute on function public.is_admin(), public.is_admin_account() to authenticated;
 grant execute on function public.is_admin() to anon;   -- used inside public read policies; returns false for visitors
 
 -- The admin account must never be deletable from the public site (it uses a normal, non-2-step session there).
 create or replace function public.delete_my_account() returns void
-language plpgsql security definer set search_path = public, auth as $
+language plpgsql security definer set search_path = public, auth as $$
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if public.is_admin_account() then raise exception 'Admin accounts cannot be erased here'; end if;
   delete from auth.users where id = auth.uid();      -- cascades to votes, predictions, consents
-end $;
+end $$;
 revoke execute on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
 -- "Invalid votes" moderation also clears predictions that point at nominees that no longer exist
 create or replace function public.admin_delete_votes(scope text, target text default null)
-returns int language plpgsql security definer set search_path = public as $
+returns int language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
   if not public.is_admin() then raise exception 'not allowed'; end if;
@@ -704,7 +704,7 @@ begin
   else raise exception 'bad scope'; end if;
   get diagnostics n = row_count;
   return n;
-end $;
+end $$;
 revoke execute on function public.admin_delete_votes(text, text) from public, anon;
 grant execute on function public.admin_delete_votes(text, text) to authenticated;
 
