@@ -1,0 +1,11 @@
+{
+  "name": "Phantom Awards 2026",
+  "short_name": "Phantom Awards",
+  "description": "Fan-made game awards by the DePhantom தமிழ் community",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#060409",
+  "theme_color": "#0b0614",
+  "icons": [{ "src": "assets/logo.png", "sizes": "128x128", "type": "image/png" }]
+}

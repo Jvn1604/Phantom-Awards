@@ -1,121 +1,80 @@
-# PHANTOM AWARDS 2026 – Setup Guide
+# Phantom Awards 2026: Setup Guide
 
-You will upload 2 website files to GitHub and run 1 SQL file in Supabase.
+The website runs on GitHub Pages. Votes are stored in Supabase. Fans sign in with Google.
 
-Files:
-- `index.html` – the voting website (public)
-- `admin.html` – your private dashboard
-- `supabase-setup.sql` – the database setup (run in Supabase, NOT uploaded to GitHub)
+## Files
 
----
-
-## PART A – Supabase (database)
-
-**1. Create the project**
-1. Go to https://supabase.com and sign in (GitHub login is fine).
-2. Click **New project**. Pick your organization, name it `phantom-awards`, set a database password (save it somewhere), choose the region closest to your fans (e.g. Singapore), and click **Create new project**. Wait about 2 minutes.
-
-**2. Turn on anonymous voting**
-1. Left menu → **Authentication**.
-2. Open **Sign In / Providers** (called "Providers" in some versions).
-3. Find **Allow anonymous sign-ins** and switch it **ON**. Save.
-
-**3. Create your admin account**
-1. Left menu → **Authentication → Users**.
-2. Click **Add user → Create new user**.
-3. Enter your email and a strong password. Tick **Auto Confirm User**. Click **Create user**.
-
-**4. Run the database setup**
-1. Open `supabase-setup.sql` in any text editor (Notepad is fine).
-2. Find `YOUR_ADMIN_EMAIL` (near the bottom) and replace it with the exact email from step 3. Keep the quotes.
-3. Optional: change the two dates near the top (`voting_ends` and `reveal_at`). You can also change them later from the admin page.
-4. In Supabase, left menu → **SQL Editor → New query**. Paste the whole file. Click **Run**.
-5. You should see "Success. No rows returned". If you see an error, copy the message and send it to me.
-
-**5. Copy your two keys**
-1. Left menu → **Project Settings → API** (or **API Keys**).
-2. Copy the **Project URL** (looks like `https://abcdxyz.supabase.co`).
-3. Copy the **anon public** key (or the **publishable** key, starts with `sb_publishable_`). Never copy the `service_role` / secret key.
+| File | What it is |
+|---|---|
+| `index.html` | Public voting site |
+| `admin.html` | Your private dashboard (2-step verification required) |
+| `overlay.html` | OBS browser source for revealing winners on stream |
+| `privacy.html`, `terms.html` | Legal pages (English + Bahasa Malaysia) |
+| `config.js` | **The only file you edit:** Supabase keys, channel links, Phantom's Picks |
+| `css/`, `js/`, `assets/` | Styles, scripts, logo and share image (no need to edit) |
+| `supabase-setup.sql` | Database setup. Run it in Supabase. Safe to run again. |
 
 ---
 
-## PART B – Put your keys in the files
+## 1. Supabase
 
-Open **both** `index.html` and `admin.html` in a text editor and change the top lines:
+1. Create a project at https://supabase.com (region close to your fans, e.g. Singapore).
+2. **Authentication → Sign In / Providers:** turn **Google** on (Client ID and Secret from Google Cloud), turn **Allow anonymous sign-ins** off.
+3. **Authentication → Multi-Factor:** make sure **TOTP (authenticator app)** is enabled. It is on by default.
+4. **Authentication → Users → Add user:** create your admin account (your email and a strong password, tick **Auto Confirm User**).
+5. Put that same email in `supabase-setup.sql` (`insert into public.admins …`), then paste the whole file into **SQL Editor** and press **Run**.
+6. **Authentication → URL Configuration:** add `https://jvn1604.github.io/Phantom-Awards/**` as a redirect URL.
+
+## 2. Keys
+
+Open `config.js` and paste your **Project URL** and **Publishable key** (`sb_publishable_…`), from **Project Settings → API Keys**:
 
 ```js
-const SUPABASE_URL="https://abcdxyz.supabase.co";
-const SUPABASE_ANON_KEY="your-anon-or-publishable-key";
+SUPABASE_URL: "https://xxxxxxxx.supabase.co",
+SUPABASE_PUBLISHABLE_KEY: "sb_publishable_xxxxxxxx",
 ```
 
-In `index.html` only, also set:
+The publishable key is meant to be public. **Never** paste the secret key (`sb_secret_…`) or the `service_role` key. The pages refuse to run if you do.
 
-```js
-const DISCORD_URL="https://discord.gg/yourinvite";   // or leave as is to hide the link
-```
+Also in `config.js`: `DISCORD_URL`, `PICKS` (your Phantom's Pick per category, names must match exactly) and `ADMIN_IDLE_MINUTES`.
 
-Optional: your personal "Phantom's Pick" badges in `index.html`:
+## 3. GitHub Pages
 
-```js
-const PICKS={
- "Game of the Year":"Crimson Desert",
- "Best Soulslike":"Nioh 3",
-};
-```
-(The name must match a nominee exactly.)
+Settings → Pages → Deploy from branch `main`, folder `/ (root)`. Upload/commit every file except the `.sql` and guides if you prefer to keep those private.
 
-**Edit nominees:** the list sits in `index.html` under `NOMINEES`. Replace every "Nominee A/B/C/D" and check the real games. Then **copy the same list into `admin.html`** (same place, marked with a comment). Do this BEFORE voting starts, and never rename a category after votes exist.
+## 4. First admin sign-in (2-step verification)
 
----
+1. Open `admin.html` and sign in with your admin email and password.
+2. The first time, a QR code appears. Scan it with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) and type the 6-digit code.
+3. From then on, every admin sign-in asks for the code from that app.
+4. **Lost your phone?** In Supabase: **Authentication → Users →** your user **→ Multi-factor → delete the factor**, then sign in again to set up a new one.
 
-## PART C – GitHub Pages (website hosting)
+The admin page signs you out after 30 minutes without activity (change `ADMIN_IDLE_MINUTES` in `config.js`).
 
-1. Go to https://github.com and sign in.
-2. Click **+ → New repository**. Name it e.g. `phantom-awards`. Set it to **Public**. Click **Create repository**.
-3. Click **uploading an existing file**. Drag in `index.html` and `admin.html` only. Click **Commit changes**.
-4. Go to **Settings → Pages**.
-5. Under **Build and deployment**, Source = **Deploy from a branch**, Branch = **main**, folder = **/ (root)**. Click **Save**.
-6. Wait 1–2 minutes. Your site is at:
-   - Voting: `https://YOUR-USERNAME.github.io/phantom-awards/`
-   - Admin: `https://YOUR-USERNAME.github.io/phantom-awards/admin.html`
+## 5. Test before you share
 
-(To update later: open the file on GitHub → pencil icon → edit → Commit, or upload the file again.)
+1. Preview without Supabase: `index.html?demo=open` (voting) and `index.html?demo` (results + live reveal).
+2. Sign in with Google on the real site, accept the policy, vote in one category.
+3. In the admin page: Overview → **Import default list** (first time only), then check that your vote appears.
+4. Settings → **Reveal results now**, check the live reveal, then set the real dates again.
+5. Moderation → delete all test votes before you share the link.
 
----
+## Security notes
 
-## PART D – Test before you share
-
-1. Open the voting site. You should see the purple logo page, a countdown and 46 tiles (no "Preview mode" message).
-2. Open a category, pick a nominee, press **Vote**. You should see confetti and "Vote saved!".
-3. Open `admin.html`, sign in with your admin email and password. You should see 1 voter, 1 vote and the charts.
-4. In Supabase → **Table Editor → votes** you will see the row.
-5. Test the reveal: on the admin page click **Reveal results now**, then open the voting site. A **Live reveal** button appears. When done, set the real reveal date again and click **Save dates**.
-6. Delete your test votes: Supabase → **SQL Editor** → run `delete from votes;`
-
----
-
-## PART E – Run the event
-
-1. Share your voting link in your video description, community post and Discord.
-2. Watch the numbers in `admin.html` (auto-refresh every 30 seconds). Use **Download CSV** any time.
-3. At the reveal time, results unlock automatically. On stream, open the site and click **Live reveal** (press Space or click for the next winner, Esc to exit).
-
----
-
-## Good to know
-- **Free Supabase projects pause after 1 week with no activity.** Open the project dashboard before the event to wake it up.
-- **Anonymous sign-ins are rate-limited per IP address.** If many people on one network (school, office) try at once, some may see an error. Ask them to retry later, or use Google/Discord login (ask me to add it).
-- **One vote per browser, not per person.** Clearing browser data or using a private window allows another vote.
-- The `anon` key is meant to be public. Security comes from the database rules in the SQL file.
-- Never put the `service_role` key in any file.
-- Keep `admin.html` private: do not share its link. Only your admin account can read data from it.
+- Database rules (row-level security) protect the data, not the website code. Nobody can read other people's votes or emails from the public site.
+- Admin rights need **both** your admin account **and** a 2-step verified session. This is enforced in the database (`is_admin()`), so it cannot be bypassed from the browser.
+- Each page has a Content Security Policy that only allows scripts from this site and the pinned Supabase/Chart.js versions.
+- If you move to a different Supabase project, nothing else changes: the policy already allows any `*.supabase.co` project.
+- Turn on 2-step verification for your Google, GitHub and Supabase accounts too.
 
 ## Troubleshooting
-| Problem | Fix |
+
+| You see | Do this |
 |---|---|
-| Page says "Preview mode" | Keys not pasted correctly in `index.html` (check quotes, no spaces) |
-| "Could not connect to Supabase" | Anonymous sign-ins not enabled (Part A step 2) |
-| Vote does nothing / error | SQL not run completely; run it again |
-| Admin: "This account is not an admin" | The email in the SQL differs from your login email; fix it and run the SQL again |
-| Admin: "Error … did you run the SQL" | Run the full SQL file again |
-| Site shows old version | Hard refresh (Ctrl+Shift+R), wait 1–2 minutes after upload |
+| "Paste your Supabase … into config.js" | Keys missing or still `YOUR_…` in `config.js` |
+| "Something went wrong" page | Supabase unreachable or paused (free projects pause after a week idle: open the dashboard) |
+| Admin: "Database not set up yet" | Run the latest `supabase-setup.sql` again |
+| Admin: "This account is not an admin" | Email in the SQL must equal your admin login email |
+| Admin: "Could not start set-up" | Enable TOTP in Authentication → Multi-Factor |
+| Vote rejected | Sign out and in again with Google, accept the policy |
+| Old version showing | Hard refresh (Ctrl+Shift+R), wait 1–2 minutes after pushing |
