@@ -66,6 +66,19 @@ The admin page signs you out after 30 minutes without activity (change `ADMIN_ID
 - Each page has a Content Security Policy that only allows scripts from this site and the pinned Supabase/Chart.js versions.
 - If you move to a different Supabase project, nothing else changes: the policy already allows any `*.supabase.co` project.
 - Turn on 2-step verification for your Google, GitHub and Supabase accounts too.
+- Votes and predictions are rate limited to 40 per minute per account, and names, texts and links have length/format limits in the database.
+
+### Supabase dashboard settings (only you can change these)
+
+| Where | Setting |
+|---|---|
+| Authentication → Sign In / Providers → **Email** | Turn **off** "Allow new users to sign up" (your admin login keeps working). Keep "Confirm email" on. |
+| Authentication → Sign In / Providers | Anonymous sign-ins **off**. Google **on**. |
+| Authentication → Multi-Factor | TOTP **on**. |
+| Authentication → Policies / Passwords | Minimum password length 12 or more. Turn on leaked-password protection if your plan has it. |
+| Authentication → Rate Limits | Keep the defaults (they limit sign-in attempts per IP). |
+| Advisors → **Security Advisor** | Run it after every SQL change. It should show no errors. |
+| Project Settings → API Keys | Only the publishable key is used by the website. Never share the secret key. |
 
 ## Troubleshooting
 
