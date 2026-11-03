@@ -657,36 +657,36 @@ end $$;
 -- Is the signed-in user an admin account? (no 2-step check; used to block deleting the admin account
 -- and to decide whether admin.html should ask for the 2-step code)
 create or replace function public.is_admin_account() returns boolean
-language sql security definer stable set search_path = public, auth as $
+language sql security definer stable set search_path = public, auth as $$
   select exists (
     select 1 from auth.users u join public.admins a on lower(a.email) = lower(u.email)
     where u.id = auth.uid() and u.email_confirmed_at is not null)
-$;
+$$;
 
 -- Full admin rights: admin account AND a 2-step verified session.
 -- Every admin policy and admin_* function calls this, so all of them now need 2-step verification.
 create or replace function public.is_admin() returns boolean
-language sql security definer stable set search_path = public, auth as $
+language sql security definer stable set search_path = public, auth as $$
   select public.is_admin_account() and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
-$;
+$$;
 revoke execute on function public.is_admin_account() from public, anon;
 grant execute on function public.is_admin(), public.is_admin_account() to authenticated;
 grant execute on function public.is_admin() to anon;   -- used inside public read policies; returns false for visitors
 
 -- The admin account must never be deletable from the public site (it uses a normal, non-2-step session there).
 create or replace function public.delete_my_account() returns void
-language plpgsql security definer set search_path = public, auth as $
+language plpgsql security definer set search_path = public, auth as $$
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if public.is_admin_account() then raise exception 'Admin accounts cannot be erased here'; end if;
   delete from auth.users where id = auth.uid();      -- cascades to votes, predictions, consents
-end $;
+end $$;
 revoke execute on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
 -- "Invalid votes" moderation also clears predictions that point at nominees that no longer exist
 create or replace function public.admin_delete_votes(scope text, target text default null)
-returns int language plpgsql security definer set search_path = public as $
+returns int language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
   if not public.is_admin() then raise exception 'not allowed'; end if;
@@ -704,7 +704,7 @@ begin
   else raise exception 'bad scope'; end if;
   get diagnostics n = row_count;
   return n;
-end $;
+end $$;
 revoke execute on function public.admin_delete_votes(text, text) from public, anon;
 grant execute on function public.admin_delete_votes(text, text) to authenticated;
 
@@ -729,3 +729,84 @@ update storage.buckets
 
 -- Make Supabase notice the new tables right away (fixes "could not find the table in the schema cache")
 notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- 13) INPUT LIMITS, RATE LIMITING, LOCKED-DOWN PRIVATE TABLES (November 2026)
+-- =====================================================================
+
+-- A) Input limits: names/descriptions have a maximum length and links must be http(s).
+--    This blocks oversized text and javascript:/data: links even if someone bypasses the website.
+--    NOT VALID = old rows are not re-checked, only new and edited ones.
+do $$
+declare r record;
+begin
+  for r in select * from (values
+    ('categories','categories_name_chk',      'char_length(name) between 1 and 120'),
+    ('categories','categories_id_chk',        'id ~ ''^[a-z0-9-]{1,80}$'''),
+    ('nominees',  'nominees_name_chk',        'char_length(name) between 1 and 120'),
+    ('nominees',  'nominees_desc_chk',        'description is null or char_length(description) <= 500'),
+    ('nominees',  'nominees_image_chk',       'image_url is null or (char_length(image_url) <= 1000 and image_url ~* ''^https?://'')'),
+    ('nominees',  'nominees_link_chk',        'link_url is null or (char_length(link_url) <= 1000 and link_url ~* ''^https?://'')'),
+    ('collabs',   'collabs_name_chk',         'char_length(name) between 1 and 80'),
+    ('collabs',   'collabs_url_chk',          'char_length(url) <= 500 and url ~* ''^https?://'''),
+    ('collabs',   'collabs_icon_chk',         'icon_url is null or (char_length(icon_url) <= 1000 and icon_url ~* ''^https?://'')'),
+    ('config',    'config_announcement_chk',  'announcement is null or char_length(announcement) <= 300'),
+    ('votes',     'votes_size_chk',           'char_length(category_id) <= 80 and char_length(choice) <= 64'),
+    ('predictions','predictions_size_chk',    'char_length(nominee_id) <= 64')
+  ) as t(tbl, con, expr)
+  loop
+    if not exists (select 1 from pg_constraint where conname = r.con) then
+      execute format('alter table public.%I add constraint %I check (%s) not valid', r.tbl, r.con, r.expr);
+    end if;
+  end loop;
+end $$;
+
+-- B) Rate limiting: each account may save at most 40 votes/predictions per minute
+--    (a fast human needs about 20). The server also sets updated_at itself so it cannot be faked.
+create table if not exists public.rate_limits (
+  voter_id uuid not null,
+  minute   timestamptz not null,
+  n        int not null default 0,
+  primary key (voter_id, minute)
+);
+alter table public.rate_limits enable row level security;   -- no policies: not readable or writable from the website
+
+create or replace function public.limit_vote_rate() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare cnt int;
+begin
+  new.updated_at := now();
+  if auth.uid() is null then return new; end if;            -- SQL Editor / admin maintenance
+  insert into public.rate_limits (voter_id, minute, n) values (auth.uid(), date_trunc('minute', now()), 1)
+  on conflict (voter_id, minute) do update set n = public.rate_limits.n + 1
+  returning n into cnt;
+  if cnt > 40 then
+    raise exception 'Too many votes in a short time. Please wait a minute and try again.' using errcode = 'P0001';
+  end if;
+  delete from public.rate_limits where voter_id = auth.uid() and minute < now() - interval '10 minutes';
+  return new;
+end $$;
+revoke execute on function public.limit_vote_rate() from public, anon, authenticated;
+
+drop trigger if exists votes_rate_limit on public.votes;
+create trigger votes_rate_limit before insert or update on public.votes
+  for each row execute function public.limit_vote_rate();
+drop trigger if exists predictions_rate_limit on public.predictions;
+create trigger predictions_rate_limit before insert or update on public.predictions
+  for each row execute function public.limit_vote_rate();
+
+-- C) Private tables: remove every table privilege from website roles (row-level security already blocks them;
+--    this is a second lock on the same door).
+revoke all on table public.admins, public.admin_secrets, public.results_archive, public.rate_limits from anon, authenticated;
+-- Visitors (not signed in) may only read; they can never write anything.
+revoke insert, update, delete, truncate on all tables in schema public from anon;
+-- Signed-in users never need to delete or truncate votes/consents directly
+revoke delete, truncate on table public.votes, public.consents from authenticated;
+revoke truncate on all tables in schema public from authenticated;
+
+-- D) Self-check (read-only). After running the file, the last result should list NO rows.
+--    Any row here is a public table without row-level security.
+select c.relname as table_without_rls
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity;
+

@@ -61,6 +61,10 @@ const PAL=['#a855f7','#f5c542','#22d3ee','#f472b6','#34d399','#fb923c','#818cf8'
 let CATS=[],NM={},T={},ov=null,cfg=null,sel=null,unknown=0,charts={},timer=null,tab='overview',filter='';
 const openSet=new Set();let VOT=[],COLLABS=[],revealAll=false;
 const sum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
+// Friendly text for database rule errors (input limits, rate limits)
+const dbErr=e=>{const m=(e&&e.message)||String(e);return /check constraint/i.test(m)?'Not saved: a name or text is too long, or a link does not start with https://':m;};
+// Length limits that match the database rules (supabase-setup.sql section 13)
+function limitInputs(){document.querySelectorAll('#app input[type=text],#app input:not([type])').forEach(i=>{if(i.maxLength>0)return;const p=(i.placeholder||'').toLowerCase();i.maxLength=/link|http|url/.test(p)?1000:/description/.test(p)?500:/closes|announcement/.test(p)?300:120;});}
 const toast=m=>{const s=$('status');if(s)s.textContent=m;};
 
 function standing(c){
@@ -283,7 +287,7 @@ function shell(){
   $('vreveal').onclick=()=>{revealAll=!revealAll;voters();};
   $('bk').onclick=backup;$('cadd').onclick=addCollab;
   $('dcsave').onclick=()=>alertsSave();$('dcreset').onclick=()=>alertsSave({p_reset:true});$('dcrm').onclick=()=>{if(confirm('Remove the saved webhook?'))alertsSave({p_webhook:''});};
-  $('dctest').onclick=async()=>{const r=await sb.rpc('admin_test_discord');$('dcst').textContent=r.error?'Error: '+r.error.message:'Test message sent. Check your Discord channel.';};
+  $('dctest').onclick=async()=>{const r=await sb.rpc('admin_test_discord');$('dcst').textContent=r.error?'Error: '+dbErr(r.error):'Test message sent. Check your Discord channel.';};
   $('annsv').onclick=()=>saveCfg({announcement:$('ann').value.trim()});$('anncl').onclick=()=>{$('ann').value='';saveCfg({announcement:''});};
   $('vrand').onclick=()=>{const g=VOT.filter(v=>v.email);if(!g.length){$('vpick').textContent='No Google voters yet.';return;}
     const v=g[Math.floor(Math.random()*g.length)];$('vpick').textContent='Winner: '+(v.name||'')+' — '+v.email;};
@@ -293,7 +297,7 @@ function shell(){
   $('cat').onchange=e=>{sel=e.target.value;selCharts();overviewTable();};
   $('mscope').onchange=modTargets;$('mdel').onclick=delVotes;
   $('ppb').onclick=async()=>{if($('ppc').value.trim()!=='PURGE'){$('ppr').textContent='Type PURGE in the box first.';return;}
-    const r=await sb.rpc('admin_purge_voter_data');$('ppr').textContent=r.error?'Error: '+r.error.message:'Done. '+r.data+' voter accounts deleted; totals kept.';if(!r.error){$('ppc').value='';refresh({editor:false});}};
+    const r=await sb.rpc('admin_purge_voter_data');$('ppr').textContent=r.error?'Error: '+dbErr(r.error):'Done. '+r.data+' voter accounts deleted; totals kept.';if(!r.error){$('ppc').value='';refresh({editor:false});}};
   $('pz').onchange=e=>saveCfg({paused:e.target.checked});
   $('pe').onchange=e=>saveCfg({predictions_enabled:e.target.checked});
   $('sv').onclick=()=>saveCfg({voting_ends:iso($('ends').value),reveal_at:iso($('rev').value)});
@@ -313,7 +317,7 @@ async function refresh(o){
   const [a,b,c,k,n,vt,cl]=await Promise.all([sb.rpc('admin_totals'),sb.rpc('admin_overview'),sb.from('config').select('*').eq('id',1).maybeSingle(),
     sb.from('categories').select('*').order('sort'),sb.from('nominees').select('*').order('sort'),sb.rpc('admin_voters'),sb.from('collabs').select('*').order('sort')]);
   const err=a.error||b.error||k.error||n.error||vt.error||cl.error;
-  if(err){toast('Error: '+err.message+' (did you run the latest supabase-setup.sql?)');return;}
+  if(err){toast('Error: '+dbErr(err)+' (did you run the latest supabase-setup.sql?)');return;}
   CATS=k.data.map(x=>({...x,noms:n.data.filter(m=>m.category_id===x.id).map(m=>({id:m.id,name:m.name,img:m.image_url,link:m.link_url,desc:m.description,sort:m.sort,category_id:m.category_id}))}));
   NM={};CATS.forEach(c=>c.noms.forEach(m=>NM[m.id]=m));
   T={};unknown=0;
@@ -323,10 +327,11 @@ async function refresh(o){
   toast('Updated '+new Date().toLocaleTimeString());
   seedBox();kpis();selCharts();timeChart();hourlyChart();completionChart();partChart();overviewTable();races();voters();exportTable();modTargets();cfgView();alertsLoad();
   if(o.editor){editor();collabsEditor();}
+  limitInputs();
 }
 async function db(p,msg){
   const r=await p;
-  if(r&&r.error){toast('Error: '+r.error.message);return false;}
+  if(r&&r.error){toast('Error: '+dbErr(r.error));return false;}
   toast(msg||'Saved');await refresh({editor:true});return true;
 }
 
@@ -338,10 +343,10 @@ function seedBox(){
   const btn=el('button','gold','Import default list');btn.onclick=async()=>{
     btn.disabled=true;
     let r=await sb.from('categories').insert(DEFAULTS.map((x,i)=>({id:x.id,name:x.name,sort:i+1})));
-    if(r.error){toast('Error: '+r.error.message);btn.disabled=false;return;}
+    if(r.error){toast('Error: '+dbErr(r.error));btn.disabled=false;return;}
     const rows=[];DEFAULTS.forEach(x=>x.noms.forEach((nm,j)=>rows.push({category_id:x.id,name:nm,sort:j+1})));
     r=await sb.from('nominees').insert(rows);
-    if(r.error){toast('Error: '+r.error.message);return;}
+    if(r.error){toast('Error: '+dbErr(r.error));return;}
     toast('Imported!');refresh({editor:true});};
   c.append(btn);b.append(c);
 }
@@ -447,7 +452,7 @@ async function propagate(name,field,val,exceptId){      // same game name in oth
   CATS.forEach(c=>c.noms.forEach(m=>{if(m.id!==exceptId&&nkey(m.name)===nkey(name)&&m[field]!==val)ids.push(m.id);}));
   if(!ids.length)return 0;
   const r=await sb.from('nominees').update({[col]:val}).in('id',ids);
-  if(r.error){toast('Error: '+r.error.message);return 0;}
+  if(r.error){toast('Error: '+dbErr(r.error));return 0;}
   return ids.length;
 }
 async function saveNominee(n,v,msg){
@@ -456,7 +461,7 @@ async function saveNominee(n,v,msg){
     if(!x&&!n[f]){const ex=sharedFor(v.name,f,n.id);if(ex){x=ex;note+=' ('+(f==='img'?'picture':f==='link'?'link':'description')+' copied from the same game)';}}
     val[col]=x;});
   const r=await sb.from('nominees').update(Object.assign({name:v.name},val)).eq('id',n.id);
-  if(r.error){toast('Error: '+r.error.message+' (run the latest supabase-setup.sql?)');return;}
+  if(r.error){toast('Error: '+dbErr(r.error)+' (run the latest supabase-setup.sql?)');return;}
   let cnt=0;
   for(const [f,col] of FIELDS){const x=val[col];if(x&&x!==n[f])cnt=Math.max(cnt,await propagate(v.name,f,x,n.id));}
   toast((msg||'Saved')+note+(cnt?' · same details applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
@@ -505,7 +510,7 @@ function editor(){
         try{url.value=await uploadImg(file.files[0],n.id);th.src=url.value;
           saveNominee(n,{name:name.value,img:url.value,link:lk.value,desc:ds.value},'Picture saved');}
         catch(e){toast('Upload failed: '+(e.message||e));}};
-      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null,link_url:lk.value.trim()||null,description:ds.value.trim()||null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+r.error.message:'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,{name:name.value,img:url.value,link:lk.value,desc:ds.value},'Saved');};
+      const s2=el('button','sm gold','Save');s2.onclick=()=>{if(!url.value.trim()&&n.img){sb.from('nominees').update({name:name.value.trim(),image_url:null,link_url:lk.value.trim()||null,description:ds.value.trim()||null}).eq('id',n.id).then(r=>{toast(r.error?'Error: '+dbErr(r.error):'Picture removed from this nominee');refresh({editor:true});});}else saveNominee(n,{name:name.value,img:url.value,link:lk.value,desc:ds.value},'Saved');};
       const u2=el('button','sm','↑');u2.onclick=()=>swap('nominees',n,c.noms[ni-1]);
       const d2=el('button','sm','↓');d2.onclick=()=>swap('nominees',n,c.noms[ni+1]);
       const x=el('button','sm red','Delete');x.onclick=async()=>{
@@ -523,7 +528,7 @@ function editor(){
     ab.onclick=async()=>{const v=an.value.trim();if(!v)return;openSet.add(c.id);
       const given=au.value.trim()||null,img=given||imageFor(v)||null,givenL=alk.value.trim()||null,lnk=givenL||linkFor(v)||null,givenD=ad.value.trim()||null,dsc=givenD||sharedFor(v,'desc')||null;
       const r=await sb.from('nominees').insert({category_id:c.id,name:v,image_url:img,link_url:lnk,description:dsc,sort:Math.max(0,...c.noms.map(m=>m.sort))+1});
-      if(r.error){toast('Error: '+r.error.message);return;}
+      if(r.error){toast('Error: '+dbErr(r.error));return;}
       const cnt=Math.max(given?await propagate(v,'img',given,null):0,givenL?await propagate(v,'link',givenL,null):0,givenD?await propagate(v,'desc',givenD,null):0);
       toast('Nominee added'+(!given&&img?' (picture copied from the same game)':'')+(cnt?' · picture applied to '+cnt+' other categor'+(cnt>1?'ies':'y'):''));
       await refresh({editor:true});};
@@ -591,7 +596,7 @@ async function addCollab(){
 }
 
 // ---------- winners export ----------
-const JSZIP='https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',PPTX='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+const JSZIP='https://cdn.jsdelivr.net/npm/jszip@3.10.2/dist/jszip.min.js',PPTX='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
 function loadScript(u){return new Promise((res,rej)=>{if(document.querySelector('script[src="'+u+'"]'))return res();const s=document.createElement('script');s.src=u;s.onload=res;s.onerror=()=>rej(new Error('Could not load '+u));document.head.append(s);});}
 const loadImg=u=>new Promise(r=>{if(!u)return r(null);const i=new Image();i.crossOrigin='anonymous';i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
 function rrect(x,a,b,w,h,r){x.beginPath();x.moveTo(a+r,b);x.arcTo(a+w,b,a+w,b+h,r);x.arcTo(a+w,b+h,a,b+h,r);x.arcTo(a,b+h,a,b,r);x.arcTo(a,b,a+w,b,r);x.closePath();}
@@ -676,7 +681,7 @@ async function delVotes(){
   if($('mconf').value.trim()!=='DELETE'){$('mres').textContent='Type DELETE in the box first.';return;}
   const sc=$('mscope').value;
   const {data,error}=await sb.rpc('admin_delete_votes',{scope:sc,target:$('mtarget').value||null});
-  $('mres').textContent=error?'Error: '+error.message:'Deleted '+data+' votes.';
+  $('mres').textContent=error?'Error: '+dbErr(error):'Deleted '+data+' votes.';
   if(!error){$('mconf').value='';refresh({editor:false});}
 }
 
@@ -694,7 +699,7 @@ async function alertsSave(extra){
   const ms=($('dcm').value||'').split(/[ ,]+/).map(Number).filter(n=>n>0).sort((x,y)=>x-y);
   const w=$('dcw').value.trim();
   const r=await sb.rpc('admin_set_alerts',Object.assign({p_webhook:w||null,p_enabled:$('dcen').checked,p_milestones:ms.length?ms:null,p_reset:false},extra||{}));
-  $('dcst').textContent=r.error?'Error: '+r.error.message:'Saved.';
+  $('dcst').textContent=r.error?'Error: '+dbErr(r.error):'Saved.';
   if(!r.error){$('dcw').value='';setTimeout(alertsLoad,300);}
 }
 const iso=v=>v?new Date(v).toISOString():undefined;
@@ -708,7 +713,7 @@ function cfgView(){
 async function saveCfg(u){
   Object.keys(u).forEach(k=>u[k]===undefined&&delete u[k]);
   const {error}=await sb.from('config').update(u).eq('id',1);
-  $('cfgmsg').textContent=error?'Error: '+error.message:'Saved.';
+  $('cfgmsg').textContent=error?'Error: '+dbErr(error):'Saved.';
   if(!error)refresh({editor:false});
 }
 

@@ -5,8 +5,10 @@
 // The publishable key (sb_publishable_...) is meant to be public.
 // NEVER paste the secret key (sb_secret_...) or the old service_role key here. The pages refuse to run if you do.
 window.PA_CONFIG = {
-  SUPABASE_URL: "https://bgklmhlffnhstxogvnln.supabase.co",
+  SUPABASE_URL: "https://bgklmhlffnhstxogvnln.supabase.co/rest/v1/",
   SUPABASE_PUBLISHABLE_KEY: "sb_publishable_bQYbN_cq18A5FacHNGg7KA_Lwhj7z2J",
+
+
 
   CHANNEL_URL: "https://www.youtube.com/@ImDePhantom",
   DISCORD_URL: "YOUR_DISCORD_INVITE_URL",        // leave as is to hide the Discord link

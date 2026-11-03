@@ -1,4 +1,6 @@
 // Phantom Awards · public voting site. Settings live in config.js.
+// Refuse to run inside another website's frame (clickjacking protection; GitHub Pages cannot send frame headers).
+if(window.top!==window.self){document.documentElement.innerHTML='';throw new Error('This page cannot be framed');}
 
 // ===== 2) NOMINEES (edit here; keep the same list in admin.html) =====
 const DEFAULTS=[
