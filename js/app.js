@@ -72,7 +72,7 @@ Object.assign(TXT.en,{back:'All categories',yourvote:'Your vote',pickTag:"Phanto
  offline:'You are offline. Votes will not be saved until you reconnect.',loadErr:'Could not refresh the latest data. Check your connection.',
  errTitle:'Something went wrong',errBody:'We could not connect to the voting server. Check your connection and try again.',retry:'Try again',browse:'Browse categories',
  swipe:'Swipe left or right to change category',skipTo:'Skip to content',noMatch:'No categories match your search.',close:'Close',menu:'Account menu',
- progress:'{a} of {b} categories voted',select:'Select',you:'you',privacyL:'Privacy',termsL:'Terms',privacyPolicy:'Privacy Policy',on:'On',off:'Off',
+ progress:'{a} of {b} categories voted',select:'Select',you:'you',privacyL:'Privacy',termsL:'Terms',privacyPolicy:'Privacy Policy',contact:'Contact',on:'On',off:'Off',
  fanMade:'Fan-made awards by the DePhantom தமிழ் community. Not affiliated with The Game Awards.',loading:'Loading'});
 Object.assign(TXT.ta,{back:'அனைத்து பிரிவுகள்',yourvote:'உங்கள் வாக்கு',pickTag:'Phantom தேர்வு',winner:'வெற்றியாளர்',live:'நேரலை முடிவுகளைப் பாருங்கள்',
  predTip:'சமூக வாக்கில் வெல்லும் என நினைக்கும் விளையாட்டில் "கணி" என்பதை அழுத்துங்கள். சரியான கணிப்புக்கு 10 புள்ளிகள்.',
@@ -90,7 +90,7 @@ Object.assign(TXT.ta,{back:'அனைத்து பிரிவுகள்',y
  offline:'இணைய இணைப்பு இல்லை. மீண்டும் இணையும் வரை வாக்குகள் சேமிக்கப்படாது.',loadErr:'புதிய தரவைப் பெற முடியவில்லை. இணைப்பைச் சரிபார்க்கவும்.',
  errTitle:'ஏதோ தவறு நடந்தது',errBody:'வாக்கு சேவையகத்துடன் இணைக்க முடியவில்லை. இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்.',retry:'மீண்டும் முயற்சி',browse:'பிரிவுகளைப் பார்',
  swipe:'பிரிவை மாற்ற இடது அல்லது வலது பக்கம் ஸ்வைப் செய்யவும்',skipTo:'உள்ளடக்கத்திற்குச் செல்',noMatch:'உங்கள் தேடலுக்குப் பொருந்தும் பிரிவுகள் இல்லை.',close:'மூடு',menu:'கணக்கு மெனு',
- progress:'{b} பிரிவுகளில் {a} வாக்களித்தவை',select:'தேர்ந்தெடு',you:'நீங்கள்',privacyL:'தனியுரிமை',termsL:'விதிமுறைகள்',privacyPolicy:'தனியுரிமைக் கொள்கை',on:'ஆன்',off:'ஆஃப்',
+ progress:'{b} பிரிவுகளில் {a} வாக்களித்தவை',select:'தேர்ந்தெடு',you:'நீங்கள்',privacyL:'தனியுரிமை',termsL:'விதிமுறைகள்',privacyPolicy:'தனியுரிமைக் கொள்கை',contact:'தொடர்பு',on:'ஆன்',off:'ஆஃப்',
  fanMade:'DePhantom தமிழ் சமூகத்தின் ரசிகர் விருதுகள். The Game Awards உடன் தொடர்பு இல்லை.',loading:'ஏற்றுகிறது'});
 
 const {C,el,makeClient,configured,safeUrl,maskEmail,icon,withIcon,catIcon}=PA;
@@ -99,6 +99,7 @@ const DISCORD_URL=String(C.DISCORD_URL||'');
 const hasDiscord=!!DISCORD_URL&&!/^YOUR_/.test(DISCORD_URL)&&safeUrl(DISCORD_URL)!=='#';
 const PICKS=C.PICKS||{};
 const LOGO='assets/logo.png';
+const CONTACT=C.CONTACT_EMAIL||'jeeven1604@gmail.com';   // organizer contact shown in the footer (also in privacy.html)
 
 let lang='en';try{lang=localStorage.getItem('lang')||'en';}catch(e){}
 const t=(k,v)=>{let s=(TXT[lang]||TXT.en)[k];if(s==null)s=TXT.en[k];if(s==null)s=k;if(v)for(const x in v)s=s.split('{'+x+'}').join(v[x]);return s;};
@@ -387,7 +388,7 @@ function footer(){
   const f=el('footer','foot'),l=el('div','flinks');
   l.append(link('YouTube',CHANNEL_URL,'youtube'));
   if(hasDiscord)l.append(link('Discord',safeUrl(DISCORD_URL),'chat'));
-  l.append(link(t('privacyL'),'privacy.html','shield'),link(t('termsL'),'terms.html','book'));
+  l.append(link(t('privacyL'),'privacy.html','shield'),link(t('termsL'),'terms.html','book'),link(t('contact'),'mailto:'+CONTACT,'chat'));
   f.append(l,el('div',0,t('fanMade')));
   return f;
 }
@@ -616,7 +617,7 @@ function reveal(){
     if(rs===0){stage.append(el('div','q',t('and')));}
     else{
       const w=winnerOf(c);
-      if(w&&w.img&&safeUrl(w.img)!=='#'){const im=el('img','wimg');im.src=w.img;im.alt='';im.referrerPolicy='no-referrer';im.onerror=()=>im.remove();stage.append(im);}
+      if(w&&w.img&&safeUrl(w.img)!=='#'){const im=el('img','wimg');im.src=w.img;im.alt=w.name;im.referrerPolicy='no-referrer';im.onerror=()=>im.remove();stage.append(im);}
       stage.append(el('div','w',w?w.name:t('none')));
       if(w)stage.append(el('div','st',w.pct+'% · '+w.v+' '+t('votes')));
       if(w){const ru=rankOf(c).filter(r=>r.nm.id!==w.id&&r.v>0).slice(0,2);
@@ -671,14 +672,14 @@ function errorPage(){
 // ---- consent + login ----
 function consentBox(){
   const l=el('label','cons');
-  l.innerHTML='<input type="checkbox" id="agree"><span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.<br><i>Saya bersetuju dengan <a href="terms.html#ms" target="_blank" rel="noopener">Terma</a> dan <a href="privacy.html#ms" target="_blank" rel="noopener">Dasar Privasi</a>.</i></span>';
+  l.innerHTML='<input type="checkbox" id="agree"><span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>, and I am 13 or older (under 18: with permission from a parent or guardian).<br><i>Saya bersetuju dengan <a href="terms.html#ms" target="_blank" rel="noopener">Terma</a> dan <a href="privacy.html#ms" target="_blank" rel="noopener">Dasar Privasi</a>, dan saya berumur 13 tahun ke atas (bawah 18 tahun: dengan kebenaran ibu bapa atau penjaga).</i></span>';
   return l;
 }
 function privacyNotice(){
   const d=el('details','pn');
   d.innerHTML='<summary>Privacy notice · Notis Privasi</summary><div>'
-   +'<b>English.</b> We collect your <b>name, email address and profile picture</b> from your Google account, and your <b>votes and predictions</b>, to verify one vote per person and run the awards, predictions and leaderboard. Giving this data is <b>voluntary</b>, but you cannot vote without it. We keep it until <b>90 days after the results are announced</b>, then delete it (anonymous totals are kept). You can ask to see, correct or delete your data at any time from the profile menu or by emailing <a href="mailto:jeeven1604@gmail.com">jeeven1604@gmail.com</a> (Jeeventhiran, DePhantom தமிழ், data controller). Full policy: <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.'
-   +'<hr><b>Bahasa Malaysia.</b> Kami mengumpul <b>nama, alamat e-mel dan gambar profil</b> daripada akaun Google anda, serta <b>undi dan ramalan</b> anda, untuk mengesahkan satu undi bagi setiap orang dan mengendalikan anugerah, ramalan dan papan pendahulu. Pemberian data ini adalah <b>secara sukarela</b>, tetapi anda tidak boleh mengundi tanpanya. Kami menyimpannya sehingga <b>90 hari selepas keputusan diumumkan</b>, kemudian memadamkannya (jumlah tanpa nama dikekalkan). Anda boleh meminta untuk melihat, membetulkan atau memadam data anda pada bila-bila masa melalui menu profil atau dengan e-mel kepada <a href="mailto:jeeven1604@gmail.com">jeeven1604@gmail.com</a> (Jeeventhiran, DePhantom தமிழ், pengawal data). Dasar penuh: <a href="privacy.html#ms" target="_blank" rel="noopener">Dasar Privasi</a>.'
+   +'<b>English.</b> We collect your <b>name, email address and profile picture</b> from your Google account, and your <b>votes and predictions</b>, to verify one vote per person and run the awards, predictions and leaderboard. Giving this data is <b>voluntary</b>, but you cannot vote without it. We keep it until <b>90 days after the results are announced</b>, then delete it (anonymous totals are kept). You can ask to see, correct or delete your data at any time from the profile menu or by emailing <a href="mailto:jeeven1604@gmail.com">jeeven1604@gmail.com</a> (Jeeventhiran, DePhantom தமிழ், data controller). Service providers: Google, Supabase, GitHub, jsDelivr and Google Fonts. No ads, no analytics, no marketing emails. You must be 13 or older. Full policy: <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.'
+   +'<hr><b>Bahasa Malaysia.</b> Kami mengumpul <b>nama, alamat e-mel dan gambar profil</b> daripada akaun Google anda, serta <b>undi dan ramalan</b> anda, untuk mengesahkan satu undi bagi setiap orang dan mengendalikan anugerah, ramalan dan papan pendahulu. Pemberian data ini adalah <b>secara sukarela</b>, tetapi anda tidak boleh mengundi tanpanya. Kami menyimpannya sehingga <b>90 hari selepas keputusan diumumkan</b>, kemudian memadamkannya (jumlah tanpa nama dikekalkan). Anda boleh meminta untuk melihat, membetulkan atau memadam data anda pada bila-bila masa melalui menu profil atau dengan e-mel kepada <a href="mailto:jeeven1604@gmail.com">jeeven1604@gmail.com</a> (Jeeventhiran, DePhantom தமிழ், pengawal data). Penyedia perkhidmatan: Google, Supabase, GitHub, jsDelivr dan Google Fonts. Tiada iklan, tiada analitik, tiada e-mel pemasaran. Anda mesti berumur 13 tahun ke atas. Dasar penuh: <a href="privacy.html#ms" target="_blank" rel="noopener">Dasar Privasi</a>.'
    +'</div>';
   return d;
 }
@@ -723,7 +724,7 @@ function loginPage(){
   card.append(el('p','tagline',t('tag')),chips,cons,hint,b,m,privacyNotice(),el('p','fine',t('loginNote')));
   const f=el('footer','hfoot');f.append(link('YouTube',CHANNEL_URL));
   if(hasDiscord)f.append(link('Discord',safeUrl(DISCORD_URL)));
-  f.append(link(t('privacyL'),'privacy.html'),link(t('termsL'),'terms.html'));
+  f.append(link(t('privacyL'),'privacy.html'),link(t('termsL'),'terms.html'),link(t('contact'),'mailto:'+CONTACT));
   const hw=el('div','hlw');hw.append(themeBtn(loginPage),langBtn(loginPage));h.append(hw,card,f);app.append(h);
 }
 

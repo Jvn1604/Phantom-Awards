@@ -44,7 +44,7 @@ function draw(){
   const c=seq[ri],r=rank(c),w=r[0];
   p.append(el('div','brand','PHANTOM AWARDS 2026'),el('h2',0,c.name));
   if(rs===0){p.append(el('div','q','And the winner is…'));return;}
-  if(w.n.img&&safeUrl(w.n.img)!=='#'){const im=el('img','img');im.src=w.n.img;im.alt='';im.referrerPolicy='no-referrer';im.onerror=()=>im.remove();p.append(im);}
+  if(w.n.img&&safeUrl(w.n.img)!=='#'){const im=el('img','img');im.src=w.n.img;im.alt=w.n.name;im.referrerPolicy='no-referrer';im.onerror=()=>im.remove();p.append(im);}
   p.append(el('div','tagw','WINNER'),el('div','w',w.n.name),el('div','st',w.pct+'% · '+w.v+' votes'));
   const ru=r.slice(1,3).filter(x=>x.v>0);
   if(ru.length){const d=el('div','ru');ru.forEach((x,k)=>{const s=el('span');s.append(medal(k+2),document.createTextNode(x.n.name+' · '+x.pct+'%'));d.append(s);});p.append(d);}

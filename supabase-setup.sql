@@ -804,9 +804,80 @@ revoke insert, update, delete, truncate on all tables in schema public from anon
 revoke delete, truncate on table public.votes, public.consents from authenticated;
 revoke truncate on all tables in schema public from authenticated;
 
--- D) Self-check (read-only). After running the file, the last result should list NO rows.
+-- D) Self-check (read-only). This query should return NO rows (scroll the results, or run it on its own).
 --    Any row here is a public table without row-level security.
 select c.relname as table_without_rls
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity;
 
+-- =====================================================================
+-- 14) PRIVACY POLICY 2026-11: data minimisation for anti-spam counters + new policy version
+-- =====================================================================
+
+-- Anti-spam counters are deleted with the account, by the retention purge, and after about 10 minutes.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'rate_limits_voter_fk') then
+    delete from public.rate_limits r where not exists (select 1 from auth.users u where u.id = r.voter_id);
+    alter table public.rate_limits add constraint rate_limits_voter_fk
+      foreign key (voter_id) references auth.users(id) on delete cascade;
+  end if;
+end $$;
+
+create or replace function public.limit_vote_rate() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare cnt int;
+begin
+  new.updated_at := now();
+  if auth.uid() is null then return new; end if;            -- SQL Editor / admin maintenance
+  insert into public.rate_limits (voter_id, minute, n) values (auth.uid(), date_trunc('minute', now()), 1)
+  on conflict (voter_id, minute) do update set n = public.rate_limits.n + 1
+  returning n into cnt;
+  if cnt > 40 then
+    raise exception 'Too many votes in a short time. Please wait a minute and try again.' using errcode = 'P0001';
+  end if;
+  delete from public.rate_limits where minute < now() - interval '10 minutes';   -- everyone's old counters
+  return new;
+end $$;
+revoke execute on function public.limit_vote_rate() from public, anon, authenticated;
+
+create or replace function public.clean_rate_limits() returns void
+language sql security definer set search_path = public as $$
+  delete from public.rate_limits where minute < now() - interval '10 minutes'
+$$;
+revoke execute on function public.clean_rate_limits() from public, anon, authenticated;
+
+do $$
+begin
+  perform cron.schedule('phantom-clean-rate-limits', '*/15 * * * *', 'select public.clean_rate_limits()');
+exception when others then
+  raise notice 'pg_cron is not enabled, old anti-spam counters are cleaned when people vote: %', sqlerrm;
+end $$;
+
+-- Retention purge also clears anti-spam counters
+create or replace function public._purge_voters() returns int
+language plpgsql security definer set search_path = public, auth as $$
+declare n int;
+begin
+  insert into public.results_archive (category_id, choice, votes)
+    select category_id, choice, count(*)::int from public.votes group by 1, 2
+  on conflict (category_id, choice) do update set votes = public.results_archive.votes + excluded.votes;
+  delete from auth.users u
+   where u.id in (select voter_id from public.votes union select voter_id from public.predictions union select voter_id from public.consents)
+     and lower(coalesce(u.email, '')) not in (select lower(email) from public.admins);
+  get diagnostics n = row_count;
+  delete from public.votes where true;
+  delete from public.predictions where true;
+  delete from public.consents where true;
+  delete from public.rate_limits where true;
+  return n;
+end $$;
+revoke execute on function public._purge_voters() from public, anon, authenticated;
+
+-- The Privacy Policy changed (version 2026-11), and it promises to ask everyone to accept the new version.
+-- Signed-in voters see the "One last step" consent screen once on their next visit. Their votes are kept.
+update public.config set consent_version = '2026-11' where id = 1 and consent_version <> '2026-11';
+alter table public.config alter column consent_version set default '2026-11';
+
+-- Show that it worked
+select consent_version from public.config where id = 1;
