@@ -14,7 +14,7 @@
 :root[data-theme="light"]{
   --bg:#f7f3ff;--bg2:#e4d7ff;--surf:#ffffff;--surf2:#efe8ff;--card:rgba(255,255,255,.86);
   --line:rgba(124,58,237,.2);--line2:rgba(124,58,237,.5);
-  --text:#1b1233;--mute:#5f5288;--acc:#7c3aed;--acc-d:#6d28d9;--acc2:#5b21b6;--gold:#c27c00;--gold2:#e9a400;--on-gold:#fff;
+  --text:#1b1233;--mute:#5f5288;--acc:#7c3aed;--acc-d:#6d28d9;--acc2:#5b21b6;--gold:#9a6200;--gold2:#a86c00;--on-gold:#fff;--red:#b91c1c;
   --track:rgba(80,50,160,.14);--glow:rgba(124,58,237,.22);
   color-scheme:light;
 }
@@ -128,9 +128,9 @@ h1{font-family:var(--f-display);font-weight:700;letter-spacing:.08em;line-height
 .seg-ctl{display:inline-flex;padding:3px;border:1px solid var(--line2);border-radius:999px;background:var(--card)}
 .seg-ctl button{border:0;background:none;color:var(--mute);height:34px;padding:0 14px;border-radius:999px;cursor:pointer;font-weight:600;font-size:13px;transition:background .2s,color .2s}
 .seg-ctl button:hover{color:var(--text)}
-.seg-ctl button[aria-pressed="true"]{background:var(--acc);color:#fff}
+.seg-ctl button[aria-pressed="true"]{background:var(--acc-d);color:#fff}
 .chipb{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 16px;border:1px solid var(--line2);border-radius:999px;background:var(--card);color:var(--acc2);cursor:pointer;font-weight:600;font-size:13px;transition:background .2s,color .2s,transform .2s var(--ease)}
-.chipb:hover{background:var(--acc);color:#fff}
+.chipb:hover{background:var(--acc-d);color:#fff}
 .chipb:active{transform:scale(.97)}
 .chipb.gold{border-color:rgba(245,197,66,.7);color:var(--gold)}
 .chipb.gold:hover{background:var(--gold);color:var(--on-gold)}
@@ -215,7 +215,7 @@ h1{font-family:var(--f-display);font-weight:700;letter-spacing:.08em;line-height
 .pill:hover{transform:translateY(-1px)}
 .pill.trl{margin-left:auto}
 .pill.trl:hover{background:#dc2626;border-color:#dc2626}
-.pill.prd:hover{background:var(--acc);border-color:var(--acc)}
+.pill.prd:hover{background:var(--acc-d);border-color:var(--acc-d)}
 .pill.prd[aria-pressed="true"]{background:var(--gold);color:var(--on-gold);border-color:var(--gold);box-shadow:0 0 14px rgba(245,197,66,.6)}
 .g b.gn{display:block;font-size:17px;font-weight:700;line-height:1.3;padding-right:28px}
 .gdesc{margin:6px 0 0;font-size:13px;line-height:1.45;color:var(--mute);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}

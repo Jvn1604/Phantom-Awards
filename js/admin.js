@@ -339,7 +339,7 @@ async function db(p,msg){
 function seedBox(){
   const b=$('seed');b.innerHTML='';
   if(CATS.length)return;
-  const c=el('div','card');c.append(el('h2',0,'No categories in the database yet'),el('p','note','Click once to load the starter list (46 categories). You can edit all of it afterwards in the "Nominees & Categories" tab.'));
+  const c=el('div','card');c.append(el('h2',0,'No categories in the database yet'),el('p','note','Click once to load the starter list (45 categories). You can edit all of it afterwards in the "Nominees & Categories" tab.'));
   const btn=el('button','gold','Import default list');btn.onclick=async()=>{
     btn.disabled=true;
     let r=await sb.from('categories').insert(DEFAULTS.map((x,i)=>({id:x.id,name:x.name,sort:i+1})));
@@ -499,7 +499,7 @@ function editor(){
     r.append(nm,hid.l,clo.l,sv,up,dn,del);body.append(r);
     c.noms.forEach((n,ni)=>{
       const row=el('div','nom');
-      const th=el('img','thumb');if(n.img)th.src=n.img;
+      const th=el('img','thumb');th.alt='';if(n.img)th.src=n.img;
       const name=el('input','nm');name.type='text';name.value=n.name;name.placeholder='Nominee name';
       const url=el('input','u');url.type='text';url.value=n.img||'';url.placeholder='Image link (or use Upload)';
       const lk=el('input','u');lk.type='text';lk.value=n.link||'';lk.placeholder='Trailer / info link (YouTube etc.)';
@@ -572,7 +572,7 @@ function collabsEditor(){
   if(!COLLABS.length)root.append(el('p','note','No collab channels yet. Add the first one above.'));
   COLLABS.forEach((c,i)=>{
     const row=el('div','nom');
-    const th=el('img','thumb');th.style.cssText='width:44px;height:44px;border-radius:50%';if(c.icon_url)th.src=c.icon_url;
+    const th=el('img','thumb');th.alt='';th.style.cssText='width:44px;height:44px;border-radius:50%';if(c.icon_url)th.src=c.icon_url;
     const name=el('input','nm');name.type='text';name.value=c.name;
     const url=el('input','u');url.type='text';url.value=c.url;
     const ic=el('input','u');ic.type='text';ic.value=c.icon_url||'';ic.placeholder='Icon image link';
